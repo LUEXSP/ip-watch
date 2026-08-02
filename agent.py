@@ -15,7 +15,7 @@ from urllib.error import HTTPError, URLError
 from datetime import datetime, timezone
 from typing import Optional
 
-VERSION = "2.5.2"
+VERSION = "2.5.3"
 HOST = "127.0.0.1"
 PORT = 8790
 IP_CHECK_SECONDS = 120
@@ -1206,10 +1206,25 @@ def compute_bank_risk(profile, fraud, abuseipdb, ipqualityscore, nature, coheren
     elif nt == "unknown":
         add("Red", 6, "Naturaleza de IP desconocida")
 
-    # El hecho de ir por túnel penaliza aunque el exit sea residencial.
+    # El hecho de ir por túnel penaliza, PERO su detectabilidad depende del exit:
+    # un banco no tiene un "detector de túnel" absoluto; lo infiere por ASN VPN/hosting,
+    # listas negras, incoherencias geo/timezone/idioma y fugas WebRTC/DNS. Con un exit
+    # residencial/móvil, coherente y sin fugas, el túnel es casi indetectable → penalizamos poco.
     if using_tunnel and nt not in ("vpn", "tor", "datacenter"):
-        add("Red", 12, "Tráfico tunelizado (VPN/WireGuard)")
-        recommendations.append("Los bancos desconfían de cualquier túnel: para trámites bancarios sensibles considera conexión directa.")
+        residential_exit = nt in ("residential", "mobile")
+        wr = client.get("webrtc") if isinstance(client, dict) else None
+        webrtc_leak = isinstance(wr, dict) and wr.get("leak") is True
+        dns_leaky = (dns_leak or {}).get("leak_suspected") is True
+        coherent = not ((coherence or {}).get("issues") or [])
+        if residential_exit:
+            if coherent and not webrtc_leak and not dns_leaky:
+                add("Red", 3, "Túnel con exit residencial/móvil, coherente y sin fugas (baja detectabilidad)")
+            else:
+                add("Red", 6, "Tráfico tunelizado con exit residencial (detectabilidad media)")
+                recommendations.append("Túnel residencial: reduce la detección corrigiendo fugas WebRTC/DNS y la coherencia geo/timezone.")
+        else:
+            add("Red", 12, "Tráfico tunelizado (VPN/WireGuard)")
+            recommendations.append("Los bancos desconfían de cualquier túnel: para trámites bancarios sensibles considera conexión directa.")
 
     # ---- Capa Reputación ----
     if (fraud or {}).get("is_blacklisted_external") is True:
