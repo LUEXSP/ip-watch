@@ -15,7 +15,7 @@ from urllib.error import HTTPError, URLError
 from datetime import datetime, timezone
 from typing import Optional
 
-VERSION = "2.5.1"
+VERSION = "2.5.2"
 HOST = "127.0.0.1"
 PORT = 8790
 IP_CHECK_SECONDS = 120
@@ -344,21 +344,33 @@ def get_ip_profile(ip: str) -> dict:
             pass
     return {"ip": ip, "source": "none"}
 
+def _parse_utc_offset(s) -> Optional[int]:
+    """Convierte '-0500' / '+05:30' a segundos desde UTC. Devuelve None si no se puede."""
+    if not s or not isinstance(s, str):
+        return None
+    m = re.match(r"^([+-])(\d{2}):?(\d{2})$", s.strip())
+    if not m:
+        return None
+    sign = -1 if m.group(1) == "-" else 1
+    return sign * (int(m.group(2)) * 3600 + int(m.group(3)) * 60)
+
 def _profile_ipapi(ip):
     data = http_get_json(f"https://ipapi.co/{ip}/json/")
     if data.get("error"): raise ValueError(data.get("reason"))
     return {"ip": ip, "city": data.get("city"), "region": data.get("region"),
             "country": data.get("country_name"), "country_code": data.get("country_code"),
             "org": data.get("org"), "asn": data.get("asn"), "timezone": data.get("timezone"),
+            "tz_offset": _parse_utc_offset(data.get("utc_offset")),
             "latitude": data.get("latitude"), "longitude": data.get("longitude"),
             "source": "ipapi.co"}
 
 def _profile_ipapi_com(ip):
-    data = http_get_json(f"http://ip-api.com/json/{ip}?fields=status,city,region,country,countryCode,org,as,timezone,lat,lon")
+    data = http_get_json(f"http://ip-api.com/json/{ip}?fields=status,city,region,country,countryCode,org,as,timezone,offset,lat,lon")
     if data.get("status") != "success": raise ValueError("fail")
     return {"ip": ip, "city": data.get("city"), "region": data.get("region"),
             "country": data.get("country"), "country_code": data.get("countryCode"),
             "org": data.get("org"), "asn": data.get("as"), "timezone": data.get("timezone"),
+            "tz_offset": data.get("offset") if isinstance(data.get("offset"), int) else None,
             "latitude": data.get("lat"), "longitude": data.get("lon"),
             "source": "ip-api.com"}
 
@@ -1051,6 +1063,27 @@ LANG_BY_COUNTRY = {
     "CN": ["zh"], "TW": ["zh"], "KR": ["ko"], "IN": ["en", "hi"], "TR": ["tr"], "GR": ["el"],
 }
 
+_WIN_TO_IANA_CACHE = None
+
+def _norm_tz(tz: str) -> str:
+    """Normaliza un nombre de zona horaria de Windows ('Central Standard Time') a IANA
+    ('America/Chicago') cuando es posible; si ya es IANA o no hay mapeo, lo devuelve igual."""
+    global _WIN_TO_IANA_CACHE
+    if not tz:
+        return ""
+    if "/" in tz:  # ya parece IANA
+        return tz
+    if _WIN_TO_IANA_CACHE is None:
+        # IANA_TO_WIN se define más abajo en el módulo; se resuelve en tiempo de ejecución.
+        _WIN_TO_IANA_CACHE = {v: k for k, v in IANA_TO_WIN.items()}
+    return _WIN_TO_IANA_CACHE.get(tz, tz)
+
+def _fmt_offset(seconds: int) -> str:
+    """Formatea un offset en segundos como '+05:30' / '-05:00'."""
+    sign = "-" if seconds < 0 else "+"
+    seconds = abs(int(seconds))
+    return f"{sign}{seconds // 3600:02d}:{(seconds % 3600) // 60:02d}"
+
 
 def compute_coherence(profile: dict, system_tz: str, client: dict = None, expected_country: str = "") -> dict:
     """Detecta incoherencias que los anti-fraude penalizan: zona horaria del sistema/navegador
@@ -1061,22 +1094,42 @@ def compute_coherence(profile: dict, system_tz: str, client: dict = None, expect
     ok = True
 
     ip_tz = profile.get("timezone") or ""
+    ip_offset = profile.get("tz_offset")
     browser_tz = client.get("timezone") or ""
     browser_lang = (client.get("language") or "").strip()
     ip_cc = (profile.get("country_code") or "").upper()
     exp_cc = (expected_country or "").upper()
 
     def _region_mismatch(a: str, b: str) -> bool:
-        ra, rb = a.split("/")[0].lower(), b.split("/")[0].lower()
+        ra, rb = _norm_tz(a).split("/")[0].lower(), _norm_tz(b).split("/")[0].lower()
         return bool(ra and rb and ra != rb)
 
-    # 1) Timezone del sistema vs IP (heurística por región continental).
-    if ip_tz and system_tz and ip_tz != system_tz and _region_mismatch(ip_tz, system_tz):
+    # Offset UTC actual del sistema donde corre el agente (= el equipo del usuario).
+    sys_offset = None
+    try:
+        _off = datetime.now().astimezone().utcoffset()
+        if _off is not None:
+            sys_offset = int(_off.total_seconds())
+    except Exception:
+        sys_offset = None
+
+    # 1) Timezone del sistema vs IP.
+    #    Preferimos comparar por OFFSET UTC: es robusto ante formatos Windows
+    #    ("Central Standard Time") vs IANA ("America/Chicago"). 1h de holgura por DST.
+    if isinstance(ip_offset, int) and sys_offset is not None:
+        if abs(sys_offset - ip_offset) > 3600:
+            ok = False
+            issues.append(
+                f"Zona horaria del sistema (UTC{_fmt_offset(sys_offset)}) no coincide "
+                f"con la de la IP (UTC{_fmt_offset(ip_offset)})."
+            )
+    elif ip_tz and system_tz and _region_mismatch(ip_tz, system_tz):
         ok = False
         issues.append(f"Zona horaria del sistema ({system_tz}) no coincide con la de la IP ({ip_tz}).")
 
-    # 2) Timezone del navegador vs IP (lo que ve realmente un sitio web).
-    if ip_tz and browser_tz and ip_tz != browser_tz and _region_mismatch(ip_tz, browser_tz):
+    # 2) Timezone del navegador vs IP (lo que ve realmente un sitio web). El navegador
+    #    reporta IANA; comparamos por región continental.
+    if ip_tz and browser_tz and _norm_tz(ip_tz) != _norm_tz(browser_tz) and _region_mismatch(ip_tz, browser_tz):
         ok = False
         issues.append(f"Zona horaria del navegador ({browser_tz}) no coincide con la de la IP ({ip_tz}).")
 
