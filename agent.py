@@ -5,7 +5,8 @@ Uso: python agent.py
 Config: ip_watch_config.json (se crea automáticamente)
 """
 
-import json, re, time, threading, platform, subprocess, socket, os, sqlite3, hashlib, hmac, secrets
+import json, re, time, threading, platform, subprocess, socket, os, sqlite3, hashlib, hmac, secrets, ssl
+import http.client
 from dataclasses import dataclass, asdict, field
 from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs, urlencode, quote
@@ -246,21 +247,62 @@ def db_get_speedtest_history(limit=20):
 # =========================================================
 # HTTP helpers
 # =========================================================
+# Contexto TLS compartido; algunas redes/túneles cortan el handshake con SSLContext por defecto,
+# así que forzamos TLS 1.2+ explícito.
+_TLS_CTX = ssl.create_default_context()
+try:
+    _TLS_CTX.minimum_version = ssl.TLSVersion.TLSv1_2
+except Exception:
+    pass
+
+# Errores transitorios de red/TLS que justifican reintentar (p.ej. UNEXPECTED_EOF por
+# microcortes del túnel WireGuard, resets de conexión, timeouts).
+_RETRYABLE = (
+    ssl.SSLError,
+    http.client.RemoteDisconnected,
+    http.client.IncompleteRead,
+    ConnectionError,
+    socket.timeout,
+    TimeoutError,
+)
+
+def urlopen_retry(req, timeout: int = 10, retries: int = 3, backoff: float = 0.6):
+    """urlopen con reintentos y backoff exponencial ante cortes transitorios de red/TLS."""
+    last = None
+    for attempt in range(retries):
+        try:
+            return urlopen(req, timeout=timeout, context=_TLS_CTX)
+        except HTTPError:
+            raise  # respuesta del servidor (4xx/5xx): no reintentar
+        except URLError as e:
+            reason = getattr(e, "reason", None)
+            if isinstance(reason, _RETRYABLE) or isinstance(reason, (socket.timeout, OSError)):
+                last = e
+            else:
+                raise
+        except _RETRYABLE as e:
+            last = e
+        except OSError as e:
+            last = e
+        if attempt < retries - 1:
+            time.sleep(backoff * (2 ** attempt))
+    raise last
+
 def http_get_json(url: str, timeout: int = 10, headers: dict = None) -> dict:
     req = Request(url, headers={"User-Agent": USER_AGENT, **(headers or {})})
-    with urlopen(req, timeout=timeout) as r:
+    with urlopen_retry(req, timeout=timeout) as r:
         return json.loads(r.read().decode("utf-8", errors="ignore"))
 
 def http_get_text(url: str, timeout: int = 15) -> str:
     req = Request(url, headers={"User-Agent": USER_AGENT})
-    with urlopen(req, timeout=timeout) as r:
+    with urlopen_retry(req, timeout=timeout) as r:
         return r.read().decode("utf-8", errors="ignore")
 
 def http_post_json(url: str, payload: dict, timeout: int = 10, headers: dict = None) -> dict:
     body = json.dumps(payload).encode("utf-8")
     req = Request(url, data=body, method="POST",
                   headers={"Content-Type": "application/json", "User-Agent": USER_AGENT, **(headers or {})})
-    with urlopen(req, timeout=timeout) as r:
+    with urlopen_retry(req, timeout=timeout) as r:
         return json.loads(r.read().decode("utf-8", errors="ignore"))
 
 # =========================================================
@@ -435,7 +477,7 @@ def _fetch_one_url(url: str, api_key: str) -> dict:
         "Accept": "application/json, text/plain;q=0.9, */*;q=0.5",
         "Cache-Control": "no-cache"
     })
-    with urlopen(req, timeout=12) as r:
+    with urlopen_retry(req, timeout=12) as r:
         body = r.read().decode("utf-8", errors="ignore")
         content_type = (r.headers.get("Content-Type") or "").lower()
         http_status = getattr(r, "status", 200)
@@ -579,7 +621,7 @@ def get_abuseipdb_score(ip: str) -> dict:
             f"https://api.abuseipdb.com/api/v2/check?ipAddress={ip}&maxAgeInDays=90",
             headers={"Key": api_key, "User-Agent": USER_AGENT, "Accept": "application/json"}
         )
-        with urlopen(req, timeout=10) as r:
+        with urlopen_retry(req, timeout=10) as r:
             data = json.loads(r.read().decode())
             d = data["data"]
             return {
@@ -617,7 +659,7 @@ def get_ipqualityscore_score(ip: str) -> dict:
     safe_url = url.replace(api_key, "***API_KEY***")
     try:
         req = Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
-        with urlopen(req, timeout=12) as r:
+        with urlopen_retry(req, timeout=12) as r:
             data = json.loads(r.read().decode("utf-8", errors="ignore"))
         if data.get("success") is False:
             return {
@@ -1283,7 +1325,7 @@ def fire_webhooks(event_type: str, payload: dict):
             body = json.dumps({"event": event_type, "ts": int(time.time()), "data": payload}).encode()
             req = Request(url, data=body, method="POST",
                           headers={"Content-Type":"application/json","User-Agent":USER_AGENT})
-            with urlopen(req, timeout=10) as r:
+            with urlopen_retry(req, timeout=10) as r:
                 sc = r.status
             db_log_webhook(url, event_type, sc, True)
             print(f"[Webhook] {event_type} → {url} [{sc}]")
