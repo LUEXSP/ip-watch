@@ -1490,6 +1490,12 @@ def load_state():
         for k in ["ip","profile","fraud","abuseipdb","ipqualityscore","privacy","dns","system","client","location","nature","coherence","dns_leak","tunnel","bank_risk","notes","last_updated_ts"]:
             if k in data:
                 setattr(status, k, data[k])
+        # El fingerprint del navegador (idioma/timezone/WebRTC) puede haber cambiado
+        # entre sesiones; lo descartamos al arrancar para no calcular coherencia/riesgo
+        # con datos rancios. El popup lo repone en /client al abrirse.
+        if isinstance(status.client, dict):
+            for volatile in ("language", "languages", "timezone", "webrtc"):
+                status.client.pop(volatile, None)
     except FileNotFoundError:
         pass
     except Exception as e:
