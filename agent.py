@@ -14,7 +14,7 @@ from urllib.error import HTTPError, URLError
 from datetime import datetime, timezone
 from typing import Optional
 
-VERSION = "2.5.0"
+VERSION = "2.5.1"
 HOST = "127.0.0.1"
 PORT = 8790
 IP_CHECK_SECONDS = 120

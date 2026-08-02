@@ -196,6 +196,28 @@
     </div>
   </div>
 
+  <!-- ── Riesgo bancario ── -->
+  <div class="section">
+    <div class="section-title">Riesgo bancario / coherencia</div>
+    <div class="card">
+      <div class="field">
+        <label>País real esperado (ISO-2)</label>
+        <input type="text" id="expCountry" maxlength="2" placeholder="p.ej. VE" style="text-transform:uppercase;width:120px"/>
+        <div class="field-hint">
+          Tu país real (código de 2 letras). Se compara con el país de la IP para la coherencia y el Riesgo bancario.
+          Déjalo vacío para autodetección.
+        </div>
+      </div>
+      <div class="toggle-row">
+        <div>
+          <div class="tl">Navego por túnel (WireGuard/VPN)</div>
+          <div class="ts">Los bancos penalizan cualquier túnel aunque el exit sea residencial. Actívalo si tu tráfico va tunelizado.</div>
+        </div>
+        <div class="sw" id="swTunnel"><div class="knob"></div></div>
+      </div>
+    </div>
+  </div>
+
   <!-- ── Script on IP change ── -->
   <div class="section">
     <div class="section-title">Script al cambiar IP</div>

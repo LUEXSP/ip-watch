@@ -56,7 +56,9 @@ async function loadConfig() {
     document.getElementById("checkInterval").value = currentConfig.check_interval_seconds || 120;
     document.getElementById("fraudThreshold").value = currentConfig.notify_on_fraud_above ?? 40;
     document.getElementById("scriptPath").value = currentConfig.script_on_ip_change || "";
+    document.getElementById("expCountry").value = (currentConfig.expected_country || "").toUpperCase();
     sw("swAutoTz", currentConfig.auto_tz);
+    sw("swTunnel", currentConfig.using_tunnel);
 
     renderWebhooks();
     renderScheduler();
@@ -101,6 +103,11 @@ window.removeWebhook = function(idx) {
 };
 
 async function saveConfig() {
+  const cc = (document.getElementById("expCountry").value || "").trim().toUpperCase();
+  if (cc && !/^[A-Z]{2}$/.test(cc)) {
+    msg("País esperado inválido. Usa un código ISO-2, p.ej. VE", true);
+    return;
+  }
   const newCfg = {
     abuseipdb_api_key: document.getElementById("abuseKey").value.trim(),
     ipqualityscore_api_key: document.getElementById("ipqsKey").value.trim(),
@@ -112,6 +119,8 @@ async function saveConfig() {
     check_interval_seconds: parseInt(document.getElementById("checkInterval").value) || 120,
     notify_on_fraud_above: parseInt(document.getElementById("fraudThreshold").value) ?? 40,
     script_on_ip_change: document.getElementById("scriptPath").value.trim(),
+    expected_country: cc,
+    using_tunnel: isSw("swTunnel"),
     auto_tz: isSw("swAutoTz"),
     webhooks: webhooks
   };
@@ -138,6 +147,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
   document.getElementById("swAutoTz").addEventListener("click", () => {
     document.getElementById("swAutoTz").classList.toggle("on");
+  });
+
+  document.getElementById("swTunnel").addEventListener("click", () => {
+    document.getElementById("swTunnel").classList.toggle("on");
   });
 
   document.getElementById("btnAddWebhook").addEventListener("click", () => {
