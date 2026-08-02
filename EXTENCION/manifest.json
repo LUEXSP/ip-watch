@@ -1,0 +1,26 @@
+{
+  "manifest_version": 3,
+  "name": "IP Watch",
+  "version": "2.4.0",
+  "description": "Monitor local de IP: reputación, clasificación residencial vs datacenter/VPN, AI-Friendly Score accionable, fugas WebRTC/DNS y alerta de caída de túnel.",
+  "action": {
+    "default_title": "IP Watch",
+    "default_popup": "popup.html"
+  },
+  "options_page": "options.html",
+  "icons": {
+    "128": "icon128.png"
+  },
+  "permissions": [
+    "storage",
+    "notifications",
+    "alarms",
+    "tts"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1:8790/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  }
+}

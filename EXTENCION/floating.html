@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>IP Watch</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; user-select:none; }
+    body {
+      width: 260px;
+      background: rgba(7, 13, 26, 0.88);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border-radius: 16px;
+      border: 1px solid rgba(255,255,255,.14);
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      color: rgba(255,255,255,.92);
+      box-shadow: 0 12px 32px rgba(0,0,0,.5);
+      -webkit-app-region: drag;
+    }
+    button, .close, a, input, [onclick] { -webkit-app-region: no-drag; }
+    .content { padding: 11px 13px; display: flex; flex-direction: column; gap: 7px; }
+    .row { display: flex; justify-content: space-between; align-items: center; font-size: 12px; }
+    .key { color: rgba(255,255,255,.55); font-size: 11px; }
+    .ip-val { font-family: monospace; font-weight: 800; font-size: 13px;
+      background: rgba(255,255,255,.1); padding: 2px 8px; border-radius: 20px; }
+    .badge { padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 700; }
+    .low  { background: rgba(52,211,153,.2);  color: #34d399; }
+    .med  { background: rgba(251,191,36,.2);  color: #fbbf24; }
+    .high { background: rgba(248,113,113,.2); color: #f87171; }
+    .close {
+      position: absolute; top: 8px; right: 10px;
+      font-size: 14px; cursor: pointer; opacity: .5;
+      -webkit-app-region: no-drag;
+    }
+    .close:hover { opacity: 1; }
+    .footer {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 0 13px 9px; font-size: 9px; opacity: .4;
+    }
+    .rotate-btn {
+      -webkit-app-region: no-drag;
+      background: rgba(248,113,113,.15); border: 1px solid rgba(248,113,113,.3);
+      color: #f87171; border-radius: 8px; padding: 4px 8px; font-size: 10px;
+      cursor: pointer; font-weight: 700;
+    }
+    .rotate-btn:hover { background: rgba(248,113,113,.25); }
+    .divider { height: 1px; background: rgba(255,255,255,.07); margin: 1px 0; }
+  </style>
+</head>
+<body>
+  <span class="close" id="closeBtn">✕</span>
+  <div class="content">
+    <div class="row">
+      <span class="key">IP</span>
+      <span class="ip-val" id="fIp">—</span>
+    </div>
+    <div class="row">
+      <span class="key">Ubicación</span>
+      <span id="fLoc" style="font-size:12px">—</span>
+    </div>
+    <div class="divider"></div>
+    <div class="row">
+      <span class="key">Fraud</span>
+      <span id="fScore" class="badge">—</span>
+    </div>
+    <div class="row">
+      <span class="key">AbuseIPDB</span>
+      <span id="fAbuse" class="badge">—</span>
+    </div>
+    <div class="row">
+      <span class="key">Proxy</span>
+      <span id="fProxy" style="font-size:12px;font-weight:700">—</span>
+    </div>
+  </div>
+  <div class="footer">
+    <span>actualiza cada 5s</span>
+    <button class="rotate-btn" id="rotateBtn">🔃 Rotar IP</button>
+  </div>
+  <script src="auth.js"></script>
+<script src="floating.js"></script>
+</body>
+</html>

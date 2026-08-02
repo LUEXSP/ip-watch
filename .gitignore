@@ -1,0 +1,18 @@
+# Datos de ejecución locales (NO distribuir: contienen tu IP/historial)
+ip_watch.db
+ip_watch_state.json
+ip_monitor_state.json
+
+# Config con secretos (API keys, token local). Usa ip_watch_config.example.json como plantilla.
+ip_watch_config.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
