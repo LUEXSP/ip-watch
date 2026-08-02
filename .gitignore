@@ -11,6 +11,10 @@ __pycache__/
 *.pyc
 *.pyo
 
+# Artefactos de testing (generados por el agente de pruebas)
+test-report.md
+TEST_PLAN.md
+
 # Editor / OS
 .DS_Store
 Thumbs.db

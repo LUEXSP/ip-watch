@@ -204,6 +204,7 @@ async function loadDash() {
     document.getElementById("proxyDetail").textContent = d.privacy?.proxy?.value || "—";
 
     renderNature(d);
+    renderBank(d);
     renderLeaks(d);
     renderTunnel(d);
 
@@ -247,6 +248,50 @@ function renderNature(d) {
     recs.innerHTML = list.length
       ? "<strong>Recomendaciones:</strong><br>" + list.map(r => `→ ${r}`).join("<br>")
       : '<span style="color:var(--good)">Todo en orden: la IP luce apta para servicios de IA.</span>';
+  }
+}
+
+// ── Riesgo bancario (estimado) ───────────────────────────
+const BANK_LEVEL_CLASS = { BAJO: "good", MEDIO: "warn", ALTO: "bad" };
+
+function renderBank(d) {
+  const b = d.bank_risk || {};
+  const badge = document.getElementById("bankLevel");
+  const score = document.getElementById("bankScore");
+  const factorsEl = document.getElementById("bankFactors");
+  const recsEl = document.getElementById("bankRecs");
+  if (!score) return;
+
+  const hasData = typeof b.risk === "number";
+  if (badge) {
+    badge.textContent = hasData ? `Riesgo ${b.level}` : "Sin datos";
+    badge.className = "chip " + (BANK_LEVEL_CLASS[b.level] || "warn");
+  }
+  if (score) {
+    score.textContent = hasData ? `${b.risk}/100` : "—";
+    // Escala inversa: riesgo alto = rojo.
+    score.style.color = hasData ? scoreColor(b.risk) : "var(--muted)";
+  }
+  // La barra crece con el riesgo (más llena = peor).
+  setFill("bankFill", hasData ? b.risk : 0, hasData ? scoreColor(b.risk) : "var(--muted)");
+
+  if (factorsEl) {
+    const f = b.factors || [];
+    factorsEl.innerHTML = f.length
+      ? f.map(x => `• +${x.delta} <span style="color:var(--muted)">[${x.layer}]</span> ${x.label}`).join("<br>")
+      : '<span style="color:var(--good)">Sin banderas de red para banca.</span>';
+  }
+  if (recsEl) {
+    const list = b.recommendations || [];
+    recsEl.innerHTML = list.length
+      ? "<strong>Recomendaciones:</strong><br>" + list.map(r => `→ ${r}`).join("<br>")
+      : "";
+  }
+  // Reflejar el país esperado configurado, sin pisar lo que el usuario está escribiendo.
+  const inp = document.getElementById("expCountry");
+  if (inp && document.activeElement !== inp) {
+    const cc = d.coherence?.expected_country || "";
+    if (cc && inp.value !== cc) inp.value = cc;
   }
 }
 
@@ -583,7 +628,21 @@ async function sendClientInfo() {
     else if (ua.includes("Edg")) browser = "Edge";
     const vm = ua.match(/(Chrome|Firefox|Edg|Safari)\/(\d+)/);
     const version = vm ? vm[2] : "";
-    await api("/client", "POST", { ua, browser: version ? `${browser} ${version}` : browser });
+    let timezone = "";
+    try { timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || ""; } catch { /* noop */ }
+    const payload = {
+      ua,
+      browser: version ? `${browser} ${version}` : browser,
+      language: navigator.language || "",
+      languages: Array.isArray(navigator.languages) ? navigator.languages.slice(0, 6) : [],
+      timezone,
+    };
+    // WebRTC lo mide el navegador; lo enviamos para el score de riesgo bancario.
+    try {
+      const wr = await testWebRTCLeak();
+      payload.webrtc = { leak: !!wr.leak, ip: wr.ip || null, reason: wr.reason || null };
+    } catch { /* silencioso */ }
+    await api("/client", "POST", payload);
   } catch { /* silencioso */ }
 }
 
@@ -765,6 +824,17 @@ document.addEventListener("DOMContentLoaded", () => {
       const d = await api("/tunnel/clear", "POST");
       toast(d.ok ? "Vigilancia de túnel limpiada" : "✗ Error", !d.ok);
       loadDash();
+    } catch (e) { toast(e.message, true); }
+  });
+  // Guardar país esperado (para el score de riesgo bancario)
+  document.getElementById("btnSaveCountry").addEventListener("click", async () => {
+    const cc = (document.getElementById("expCountry").value || "").trim().toUpperCase();
+    if (cc && !/^[A-Z]{2}$/.test(cc)) { toast("Usa un código ISO-2, p.ej. VE", true); return; }
+    try {
+      await api("/config", "POST", { expected_country: cc });
+      toast(cc ? `País esperado: ${cc}` : "País esperado borrado (auto)");
+      await api("/refresh", "POST");
+      setTimeout(loadDash, 1500);
     } catch (e) { toast(e.message, true); }
   });
   document.getElementById("btnSyncTz").addEventListener("click", async () => {

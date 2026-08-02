@@ -16,5 +16,7 @@
   "ipqualityscore_api_key": "",
   "ipqualityscore_strictness": 1,
   "tunnel_watch_enabled": true,
-  "tunnel_expected": {}
+  "tunnel_expected": {},
+  "expected_country": "",
+  "using_tunnel": true
 }

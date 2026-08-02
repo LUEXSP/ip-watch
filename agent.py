@@ -14,7 +14,7 @@ from urllib.error import HTTPError, URLError
 from datetime import datetime, timezone
 from typing import Optional
 
-VERSION = "2.4.0"
+VERSION = "2.5.0"
 HOST = "127.0.0.1"
 PORT = 8790
 IP_CHECK_SECONDS = 120
@@ -45,6 +45,8 @@ DEFAULT_CONFIG = {
     "safe_export": True,
     "tunnel_watch_enabled": True,   # vigilar la caída/cambio del túnel (kill-switch informativo)
     "tunnel_expected": {},          # estado "bueno" fijado por el usuario: {ip, country_code, asn, nature}
+    "expected_country": "",         # país real esperado (ISO-2) para el score de riesgo bancario; vacío = auto
+    "using_tunnel": True,           # el usuario navega vía WireGuard/VPN (los bancos penalizan cualquier túnel)
 }
 
 config = dict(DEFAULT_CONFIG)
@@ -971,25 +973,184 @@ def compute_ai_friendly(profile, fraud, privacy, abuseipdb=None, ipqualityscore=
 # =========================================================
 # Coherencia (timezone / geo)
 # =========================================================
-def compute_coherence(profile: dict, system_tz: str) -> dict:
-    """Detecta incoherencias que los anti-fraude penalizan (p.ej. zona horaria del
-    sistema distinta a la del país de la IP)."""
+# Idioma(s) principal(es) que se esperarían para cada país (ISO-2). Heurística ligera:
+# solo penalizamos cuando conocemos el país y ninguno de sus idiomas encaja con el del navegador.
+LANG_BY_COUNTRY = {
+    "US": ["en"], "GB": ["en"], "CA": ["en", "fr"], "AU": ["en"], "NZ": ["en"], "IE": ["en"],
+    "ES": ["es"], "MX": ["es"], "AR": ["es"], "CO": ["es"], "CL": ["es"], "PE": ["es"],
+    "VE": ["es"], "EC": ["es"], "GT": ["es"], "CU": ["es"], "BO": ["es"], "DO": ["es"],
+    "HN": ["es"], "PY": ["es"], "SV": ["es"], "NI": ["es"], "CR": ["es"], "PA": ["es"], "UY": ["es"],
+    "BR": ["pt"], "PT": ["pt"], "FR": ["fr"], "BE": ["nl", "fr"], "DE": ["de"], "AT": ["de"],
+    "CH": ["de", "fr", "it"], "IT": ["it"], "NL": ["nl"], "SE": ["sv"], "NO": ["no", "nb"],
+    "DK": ["da"], "FI": ["fi"], "PL": ["pl"], "RU": ["ru"], "UA": ["uk", "ru"], "JP": ["ja"],
+    "CN": ["zh"], "TW": ["zh"], "KR": ["ko"], "IN": ["en", "hi"], "TR": ["tr"], "GR": ["el"],
+}
+
+
+def compute_coherence(profile: dict, system_tz: str, client: dict = None, expected_country: str = "") -> dict:
+    """Detecta incoherencias que los anti-fraude penalizan: zona horaria del sistema/navegador
+    vs país de la IP, idioma del navegador vs país, y país esperado (KYC) vs país de la IP."""
+    profile = profile or {}
+    client = client or {}
     issues = []
     ok = True
-    ip_tz = (profile or {}).get("timezone") or ""
-    if ip_tz and system_tz:
-        if ip_tz != system_tz:
-            # Comparar por región continental como heurística ligera.
-            ip_region = ip_tz.split("/")[0].lower()
-            sys_region = system_tz.split("/")[0].lower()
-            if ip_region and sys_region and ip_region != sys_region:
-                ok = False
-                issues.append(f"Zona horaria del sistema ({system_tz}) no coincide con la de la IP ({ip_tz}).")
+
+    ip_tz = profile.get("timezone") or ""
+    browser_tz = client.get("timezone") or ""
+    browser_lang = (client.get("language") or "").strip()
+    ip_cc = (profile.get("country_code") or "").upper()
+    exp_cc = (expected_country or "").upper()
+
+    def _region_mismatch(a: str, b: str) -> bool:
+        ra, rb = a.split("/")[0].lower(), b.split("/")[0].lower()
+        return bool(ra and rb and ra != rb)
+
+    # 1) Timezone del sistema vs IP (heurística por región continental).
+    if ip_tz and system_tz and ip_tz != system_tz and _region_mismatch(ip_tz, system_tz):
+        ok = False
+        issues.append(f"Zona horaria del sistema ({system_tz}) no coincide con la de la IP ({ip_tz}).")
+
+    # 2) Timezone del navegador vs IP (lo que ve realmente un sitio web).
+    if ip_tz and browser_tz and ip_tz != browser_tz and _region_mismatch(ip_tz, browser_tz):
+        ok = False
+        issues.append(f"Zona horaria del navegador ({browser_tz}) no coincide con la de la IP ({ip_tz}).")
+
+    # 3) Idioma del navegador vs país de la IP.
+    lang_ok = None
+    if browser_lang and ip_cc and ip_cc in LANG_BY_COUNTRY:
+        primary = browser_lang.split("-")[0].lower()
+        expected_langs = LANG_BY_COUNTRY[ip_cc]
+        lang_ok = primary in expected_langs
+        if not lang_ok:
+            ok = False
+            issues.append(
+                f"Idioma del navegador ({browser_lang}) no es típico del país de la IP "
+                f"({ip_cc}: {', '.join(expected_langs)})."
+            )
+
+    # 4) País esperado (KYC) vs país de la IP.
+    country_match = None
+    if exp_cc and ip_cc:
+        country_match = exp_cc == ip_cc
+        if not country_match:
+            ok = False
+            issues.append(f"País esperado ({exp_cc}) no coincide con el país de la IP ({ip_cc}).")
+
     return {
         "ok": ok,
         "ip_timezone": ip_tz,
         "system_timezone": system_tz,
+        "browser_timezone": browser_tz or None,
+        "browser_language": browser_lang or None,
+        "ip_country": ip_cc or None,
+        "expected_country": exp_cc or None,
+        "language_ok": lang_ok,
+        "country_match": country_match,
         "issues": issues,
+    }
+
+
+# =========================================================
+# Score de riesgo bancario (estimado)
+# =========================================================
+def compute_bank_risk(profile, fraud, abuseipdb, ipqualityscore, nature, coherence,
+                      client=None, dns_leak=None, privacy=None, using_tunnel=True) -> dict:
+    """
+    Estima cómo puntuaría un motor de riesgo bancario/fintech. A diferencia del
+    AI-Friendly (que premia "residencial=limpio"), aquí una IP residencial es solo
+    lo mínimo esperable: partimos de riesgo 0 y SUMAMOS puntos por cada bandera.
+    Score 0-100 donde 0 = riesgo bajo, 100 = riesgo alto (escala inversa al AI-Friendly).
+    La IP/red es solo una capa; pesan también coherencia, fingerprint y reputación.
+    """
+    client = client or {}
+    dns_leak = dns_leak or {}
+    privacy = privacy or {}
+    risk = 0
+    factors = []
+    recommendations = []
+
+    def add(layer, delta, label):
+        nonlocal risk
+        risk += delta
+        factors.append({"layer": layer, "delta": delta, "label": label})
+
+    # ---- Capa Red / naturaleza de la IP (una señal entre varias) ----
+    nt = (nature or {}).get("type")
+    if nt == "datacenter":
+        add("Red", 25, "IP de datacenter/hosting")
+        recommendations.append("Un banco marca datacenter/hosting como alto riesgo: usa un exit residencial.")
+    elif nt == "vpn":
+        add("Red", 22, "IP catalogada VPN/proxy")
+        recommendations.append("La IP está catalogada como VPN/proxy: para banca conviene una residencial no marcada.")
+    elif nt == "tor":
+        add("Red", 45, "Salida Tor")
+        recommendations.append("Tor es rechazo casi seguro en banca.")
+    elif nt == "unknown":
+        add("Red", 6, "Naturaleza de IP desconocida")
+
+    # El hecho de ir por túnel penaliza aunque el exit sea residencial.
+    if using_tunnel and nt not in ("vpn", "tor", "datacenter"):
+        add("Red", 12, "Tráfico tunelizado (VPN/WireGuard)")
+        recommendations.append("Los bancos desconfían de cualquier túnel: para trámites bancarios sensibles considera conexión directa.")
+
+    # ---- Capa Reputación ----
+    if (fraud or {}).get("is_blacklisted_external") is True:
+        add("Reputación", 35, "IP en lista negra")
+        recommendations.append("IP en lista negra: rota; para banca ya está quemada.")
+    fs = (fraud or {}).get("fraud_score")
+    if isinstance(fs, int):
+        if fs >= 40: add("Reputación", 25, f"Fraude Scamalytics alto ({fs})")
+        elif fs >= 20: add("Reputación", 12, f"Fraude Scamalytics medio ({fs})")
+    ab = (abuseipdb or {}).get("score")
+    if isinstance(ab, int):
+        if ab >= 50: add("Reputación", 20, f"AbuseIPDB alto ({ab})")
+        elif ab >= 25: add("Reputación", 10, f"AbuseIPDB medio ({ab})")
+    iq = (ipqualityscore or {}).get("score")
+    if isinstance(iq, int):
+        if iq >= 85: add("Reputación", 25, f"IPQualityScore alto ({iq})")
+        elif iq >= 40: add("Reputación", 12, f"IPQualityScore medio ({iq})")
+    if ipqualityscore:
+        if ipqualityscore.get("recent_abuse") is True:
+            add("Reputación", 12, "IPQS: abuso reciente")
+        if ipqualityscore.get("bot_status") is True:
+            add("Reputación", 10, "IPQS: comportamiento bot")
+
+    # ---- Capa Coherencia (geo/idioma/timezone/KYC) ----
+    coh = coherence or {}
+    coh_issues = coh.get("issues", []) or []
+    if coh.get("country_match") is False:
+        add("Coherencia", 20, "País esperado ≠ país de la IP")
+        recommendations.append("El país de tu IP no coincide con tu país real: gran bandera para banca.")
+    if coh.get("language_ok") is False:
+        add("Coherencia", 12, "Idioma del navegador ≠ país de la IP")
+    tz_issue = any("horaria" in i.lower() for i in coh_issues)
+    if tz_issue:
+        add("Coherencia", 12, "Zona horaria incoherente con la IP")
+
+    # ---- Capa Fingerprint / fugas ----
+    wr = client.get("webrtc") if isinstance(client, dict) else None
+    if isinstance(wr, dict) and wr.get("leak") is True:
+        add("Fingerprint", 12, "Fuga WebRTC (IP expuesta)")
+        recommendations.append("WebRTC filtra una IP real: desactiva WebRTC o usa una extensión que lo bloquee.")
+    if dns_leak.get("leak_suspected") is True:
+        add("Fingerprint", 10, "Posible fuga de DNS")
+    if isinstance(privacy.get("proxy"), dict) and privacy["proxy"].get("enabled") is True:
+        add("Fingerprint", 8, "Proxy del sistema activo")
+
+    risk = max(0, min(100, risk))
+    if risk >= 60:
+        level = "ALTO"
+    elif risk >= 25:
+        level = "MEDIO"
+    else:
+        level = "BAJO"
+    if level == "BAJO" and not recommendations:
+        recommendations.append("Sin banderas de red relevantes para banca. (No sustituye señales de comportamiento/KYC que solo ve el banco.)")
+    return {
+        "risk": risk,
+        "level": level,
+        "factors": factors[:12],
+        "recommendations": recommendations[:6],
     }
 
 
@@ -1286,6 +1447,7 @@ class Status:
     coherence: dict = field(default_factory=dict)
     dns_leak: dict = field(default_factory=dict)
     tunnel: dict = field(default_factory=dict)
+    bank_risk: dict = field(default_factory=dict)
     notes: list = field(default_factory=list)
 
     def add_note(self, note: str):
@@ -1325,7 +1487,7 @@ def load_state():
     try:
         with open(STATE_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
-        for k in ["ip","profile","fraud","abuseipdb","ipqualityscore","privacy","dns","system","client","location","nature","coherence","dns_leak","tunnel","notes","last_updated_ts"]:
+        for k in ["ip","profile","fraud","abuseipdb","ipqualityscore","privacy","dns","system","client","location","nature","coherence","dns_leak","tunnel","bank_risk","notes","last_updated_ts"]:
             if k in data:
                 setattr(status, k, data[k])
     except FileNotFoundError:
@@ -1392,9 +1554,9 @@ def refresh_full(ip: str, egress_info: dict = None):
     privacy = {"proxy": proxy, "anonymizer_likely": anonymizer_likely}
     ai_friendly = compute_ai_friendly(profile, fraud, privacy, abuseipdb_data, ipqs_data, nature)
 
-    # Coherencia timezone del sistema vs país de la IP.
+    # Coherencia del sistema/navegador vs país de la IP (timezone, idioma, país esperado).
     system_tz = get_system_timezone()
-    coherence = compute_coherence(profile, system_tz)
+    coherence = compute_coherence(profile, system_tz, status.client, config.get("expected_country", ""))
     if not coherence.get("ok"):
         status.add_note("Coherencia: " + "; ".join(coherence.get("issues", [])))
 
@@ -1411,6 +1573,13 @@ def refresh_full(ip: str, egress_info: dict = None):
     if tunnel.get("pinned") and not tunnel.get("ok"):
         status.add_note("⚠️ Túnel: " + "; ".join(tunnel.get("issues", [])))
 
+    # Riesgo bancario estimado (escala inversa: 0 = riesgo bajo).
+    bank_risk = compute_bank_risk(
+        profile, fraud, abuseipdb_data, ipqs_data, nature, coherence,
+        client=status.client, dns_leak=dns_leak, privacy=privacy,
+        using_tunnel=bool(config.get("using_tunnel", True)),
+    )
+
     status.ip = ip
     status.profile = profile
     status.fraud = fraud
@@ -1422,8 +1591,10 @@ def refresh_full(ip: str, egress_info: dict = None):
     status.coherence = coherence
     status.dns_leak = dns_leak
     status.tunnel = tunnel
+    status.bank_risk = bank_risk
     status.last_updated_ts = int(time.time())
     status.add_note(f"Naturaleza IP: {nature.get('label')} · AI-Friendly {ai_friendly.get('label')} ({ai_friendly.get('score')})")
+    status.add_note(f"Riesgo bancario estimado: {bank_risk.get('level')} ({bank_risk.get('risk')}/100)")
     status.system = {
         "os": platform.platform(),
         "machine": platform.machine(),
@@ -1628,7 +1799,20 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == "/client":
             data = self._read_body()
-            status.client = {"ua": data.get("ua"), "browser": data.get("browser"), "ts": int(time.time())}
+            client = {
+                "ua": data.get("ua"),
+                "browser": data.get("browser"),
+                "language": data.get("language"),
+                "languages": data.get("languages"),
+                "timezone": data.get("timezone"),
+                "ts": int(time.time()),
+            }
+            # WebRTC lo reporta el navegador (leak/ip/reason); conservarlo si viene.
+            if isinstance(data.get("webrtc"), dict):
+                client["webrtc"] = data["webrtc"]
+            elif isinstance(status.client, dict) and status.client.get("webrtc"):
+                client["webrtc"] = status.client["webrtc"]
+            status.client = client
             save_state()
             self._send_json({"ok": True})
             return
