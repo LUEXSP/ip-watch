@@ -655,12 +655,35 @@ def get_ipqualityscore_score(ip: str) -> dict:
         "fast": "true",
         "mobile": "true"
     })
-    url = f"https://ipqualityscore.com/api/json/ip/{quote(api_key)}/{quote(ip)}?{params}"
-    safe_url = url.replace(api_key, "***API_KEY***")
+    # Algunos túneles/ISP resetean el TLS (UNEXPECTED_EOF) contra un host concreto;
+    # probamos apex y www como fallback antes de rendirnos.
+    hosts = ["ipqualityscore.com", "www.ipqualityscore.com"]
+    data = None
+    last_net_err = None
+    safe_url = f"https://ipqualityscore.com/api/json/ip/***API_KEY***/{quote(ip)}?{params}"
+    for host in hosts:
+        url = f"https://{host}/api/json/ip/{quote(api_key)}/{quote(ip)}?{params}"
+        try:
+            req = Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
+            with urlopen_retry(req, timeout=12) as r:
+                data = json.loads(r.read().decode("utf-8", errors="ignore"))
+            break
+        except HTTPError as e:
+            try:
+                body = e.read().decode("utf-8", errors="ignore")[:220]
+            except Exception:
+                body = ""
+            return {"error": f"HTTP {e.code}: {body}", "source": "ipqualityscore", "url": safe_url}
+        except Exception as e:
+            last_net_err = e
+            continue
+    if data is None:
+        return {
+            "error": f"No se pudo contactar IPQualityScore (posible bloqueo del túnel/ISP): {last_net_err}",
+            "source": "ipqualityscore",
+            "url": safe_url,
+        }
     try:
-        req = Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
-        with urlopen_retry(req, timeout=12) as r:
-            data = json.loads(r.read().decode("utf-8", errors="ignore"))
         if data.get("success") is False:
             return {
                 "error": data.get("message") or "IPQualityScore API devolvió error",
