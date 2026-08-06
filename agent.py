@@ -15,7 +15,7 @@ from urllib.error import HTTPError, URLError
 from datetime import datetime, timezone
 from typing import Optional
 
-VERSION = "2.5.4"
+VERSION = "2.5.5"
 HOST = "127.0.0.1"
 PORT = 8790
 IP_CHECK_SECONDS = 120
@@ -1102,6 +1102,33 @@ def _fmt_offset(seconds: int) -> str:
     return f"{sign}{seconds // 3600:02d}:{(seconds % 3600) // 60:02d}"
 
 
+def _live_system_utc_offset() -> Optional[int]:
+    """Offset UTC ACTUAL del sistema, en segundos.
+
+    En Windows lo consulta en vivo (PowerShell) porque Python/CRT cachea la zona horaria
+    al arrancar: tras un 'Sync TZ' (tzutil) el proceso seguiría reportando la zona vieja
+    hasta reiniciarse, dejando el falso +12 de coherencia aunque el usuario ya sincronizó.
+    Fuera de Windows (o si falla) usa el offset local de Python."""
+    if IS_WINDOWS:
+        try:
+            out = subprocess.check_output(
+                ["powershell", "-NoProfile", "-Command", "(Get-Date).ToString('zzz')"],
+                text=True, errors="ignore", timeout=6,
+            ).strip()
+            off = _parse_utc_offset(out)
+            if off is not None:
+                return off
+        except Exception:
+            pass
+    try:
+        _off = datetime.now().astimezone().utcoffset()
+        if _off is not None:
+            return int(_off.total_seconds())
+    except Exception:
+        pass
+    return None
+
+
 def compute_coherence(profile: dict, system_tz: str, client: dict = None, expected_country: str = "") -> dict:
     """Detecta incoherencias que los anti-fraude penalizan: zona horaria del sistema/navegador
     vs país de la IP, idioma del navegador vs país, y país esperado (KYC) vs país de la IP."""
@@ -1122,13 +1149,9 @@ def compute_coherence(profile: dict, system_tz: str, client: dict = None, expect
         return bool(ra and rb and ra != rb)
 
     # Offset UTC actual del sistema donde corre el agente (= el equipo del usuario).
-    sys_offset = None
-    try:
-        _off = datetime.now().astimezone().utcoffset()
-        if _off is not None:
-            sys_offset = int(_off.total_seconds())
-    except Exception:
-        sys_offset = None
+    # Se consulta en vivo para reflejar un cambio reciente de zona horaria (Sync TZ)
+    # sin necesidad de reiniciar el agente.
+    sys_offset = _live_system_utc_offset()
 
     # 1) Timezone del sistema vs IP.
     #    Preferimos comparar por OFFSET UTC: es robusto ante formatos Windows

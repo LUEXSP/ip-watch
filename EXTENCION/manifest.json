@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "IP Watch",
-  "version": "2.5.4",
+  "version": "2.5.5",
   "description": "Monitor local de IP: reputación, clasificación residencial vs datacenter/VPN, AI-Friendly Score, Riesgo bancario estimado, fugas WebRTC/DNS y alerta de caída de túnel.",
   "action": {
     "default_title": "IP Watch",
