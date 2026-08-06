@@ -20,3 +20,7 @@ TEST_PLAN.md
 Thumbs.db
 .vscode/
 .idea/
+
+.agents/
+TEST_PLAN*.md
+test-report*.md
