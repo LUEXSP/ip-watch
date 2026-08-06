@@ -15,7 +15,7 @@ from urllib.error import HTTPError, URLError
 from datetime import datetime, timezone
 from typing import Optional
 
-VERSION = "2.5.3"
+VERSION = "2.5.4"
 HOST = "127.0.0.1"
 PORT = 8790
 IP_CHECK_SECONDS = 120
@@ -335,14 +335,26 @@ def _ip_api():
     return {"ip": data["query"], "ts": int(time.time()), "source": "ip-api"}
 
 def get_ip_profile(ip: str) -> dict:
+    # Preferimos un proveedor que devuelva org/ASN: sin ese dato el clasificador
+    # marca la IP como "desconocida" aunque sea residencial (p.ej. Cox/Charter).
+    best = None
     for getter in [lambda: _profile_ipapi(ip), lambda: _profile_ipapi_com(ip), lambda: _profile_ipinfo(ip)]:
         try:
             result = getter()
-            if result.get("city") or result.get("country"):
-                return result
         except Exception:
-            pass
-    return {"ip": ip, "source": "none"}
+            continue
+        if not (result.get("city") or result.get("country")):
+            continue
+        if result.get("org") or result.get("asn"):
+            if best is not None:
+                # Conserva campos útiles (tz_offset/lat/lon) del primer proveedor.
+                for k, v in best.items():
+                    if not result.get(k) and v:
+                        result[k] = v
+            return result
+        if best is None:
+            best = result
+    return best or {"ip": ip, "source": "none"}
 
 def _parse_utc_offset(s) -> Optional[int]:
     """Convierte '-0500' / '+05:30' a segundos desde UTC. Devuelve None si no se puede."""
@@ -888,6 +900,11 @@ RESIDENTIAL_KW = [
     "telecom", "cable", "fiber", "fibra", "broadband", "isp", "communications",
     "telefonica", "comcast", "spectrum", "cox", "charter", "att internet",
     "residential", "dsl", "adsl",
+    # ISPs de consumo comunes (EE. UU. y LatAm) para clasificar sin IPQS:
+    "xfinity", "centurylink", "lumen", "frontier", "windstream", "mediacom",
+    "suddenlink", "optimum", "cablevision", "brightspeed", "fios", "verizon fios",
+    "cable one", "sparklight", "wow!", "wideopenwest", "metronet", "ziply",
+    "telmex", "izzi", "totalplay", "cantv", "inter", "digitel", "megacable",
 ]
 
 
@@ -1134,11 +1151,16 @@ def compute_coherence(profile: dict, system_tz: str, client: dict = None, expect
         issues.append(f"Zona horaria del navegador ({browser_tz}) no coincide con la de la IP ({ip_tz}).")
 
     # 3) Idioma del navegador vs país de la IP.
+    #    El idioma refleja QUIÉN eres, no por dónde sale tu tráfico: si coincide con
+    #    tu país real declarado (expected_country/KYC) no es una incoherencia, aunque
+    #    el exit esté en otro país. Solo penalizamos cuando no encaja ni con el país
+    #    de la IP ni con tu país real.
     lang_ok = None
     if browser_lang and ip_cc and ip_cc in LANG_BY_COUNTRY:
         primary = browser_lang.split("-")[0].lower()
         expected_langs = LANG_BY_COUNTRY[ip_cc]
-        lang_ok = primary in expected_langs
+        kyc_langs = LANG_BY_COUNTRY.get(exp_cc, []) if exp_cc else []
+        lang_ok = primary in expected_langs or (bool(kyc_langs) and primary in kyc_langs)
         if not lang_ok:
             ok = False
             issues.append(
