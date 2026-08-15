@@ -15,7 +15,7 @@ from urllib.error import HTTPError, URLError
 from datetime import datetime, timezone
 from typing import Optional
 
-VERSION = "2.5.5"
+VERSION = "2.6.0"
 HOST = "127.0.0.1"
 PORT = 8790
 IP_CHECK_SECONDS = 120
@@ -45,7 +45,8 @@ DEFAULT_CONFIG = {
     "local_auth_token": "",  # token local para extensión/agente
     "safe_export": True,
     "tunnel_watch_enabled": True,   # vigilar la caída/cambio del túnel (kill-switch informativo)
-    "tunnel_expected": {},          # estado "bueno" fijado por el usuario: {ip, country_code, asn, nature}
+    "tunnel_expected": {},          # estado "bueno" fijado por el usuario: {ip, country_code, region, asn, nature}
+    "tunnel_watch_scope": "country",  # qué dispara la alerta: "country" | "region" | "strict"
     "expected_country": "",         # país real esperado (ISO-2) para el score de riesgo bancario; vacío = auto
     "using_tunnel": True,           # el usuario navega vía WireGuard/VPN (los bancos penalizan cualquier túnel)
 }
@@ -1383,36 +1384,64 @@ def analyze_dns_leak(dns_servers: list, exit_country_code: str) -> dict:
 def compute_tunnel(ip: str, profile: dict, nature: dict) -> dict:
     """
     Compara el estado actual contra el estado "bueno" que el usuario fijó
-    (`tunnel_expected`). Si la IP/país/ASN/naturaleza cambian, se considera
-    una posible caída o cambio de túnel y se avisa.
+    (`tunnel_expected`) y avisa de una posible caída o cambio de túnel.
+
+    El alcance lo decide `tunnel_watch_scope`, porque un exit residencial rota de IP
+    constantemente sin que el túnel se caiga:
+      - "country" (por defecto): solo avisa si cambias de país, o si el exit degrada
+        a datacenter/VPN/Tor. Rotar de IP dentro del mismo país no es una alerta.
+      - "region": además avisa si cambias de estado/región.
+      - "strict": avisa por cualquier cambio de IP/país/ASN/naturaleza.
     """
     profile = profile or {}
     nature = nature or {}
     enabled = bool(config.get("tunnel_watch_enabled", True))
+    scope = (config.get("tunnel_watch_scope") or "country").lower()
+    if scope not in ("country", "region", "strict"):
+        scope = "country"
     expected = config.get("tunnel_expected") or {}
     current = {
         "ip": ip,
         "country_code": (profile.get("country_code") or "").upper() or None,
+        "country": profile.get("country"),
+        "region": profile.get("region"),
+        "city": profile.get("city"),
         "asn": profile.get("asn"),
         "nature": nature.get("type"),
     }
     if not expected:
-        return {"enabled": enabled, "pinned": False, "ok": True, "current": current, "expected": None, "issues": []}
+        return {"enabled": enabled, "pinned": False, "ok": True, "scope": scope,
+                "current": current, "expected": None, "issues": []}
 
     issues = []
-    if expected.get("ip") and expected["ip"] != current["ip"]:
-        issues.append(f"IP cambió: {expected['ip']} → {current['ip']}")
+
+    # El país es la señal que de verdad importa en cualquier alcance.
     if expected.get("country_code") and current["country_code"] and expected["country_code"] != current["country_code"]:
         issues.append(f"País cambió: {expected['country_code']} → {current['country_code']}")
-    if expected.get("asn") and current["asn"] and expected["asn"] != current["asn"]:
-        issues.append(f"ASN cambió: {expected['asn']} → {current['asn']}")
-    if expected.get("nature") and current["nature"] and expected["nature"] != current["nature"]:
-        issues.append(f"Naturaleza cambió: {expected['nature']} → {current['nature']}")
+
+    # Degradación del exit: pasar a datacenter/VPN/Tor sí es una alerta real.
+    bad_nature = ("datacenter", "vpn", "tor")
+    if current["nature"] in bad_nature and expected.get("nature") not in bad_nature:
+        issues.append(f"El exit degradó a {current['nature']} (antes {expected.get('nature') or 'n/d'})")
+
+    if scope in ("region", "strict"):
+        if expected.get("region") and current["region"] and expected["region"] != current["region"]:
+            issues.append(f"Estado/región cambió: {expected['region']} → {current['region']}")
+
+    if scope == "strict":
+        if expected.get("ip") and expected["ip"] != current["ip"]:
+            issues.append(f"IP cambió: {expected['ip']} → {current['ip']}")
+        if expected.get("asn") and current["asn"] and expected["asn"] != current["asn"]:
+            issues.append(f"ASN cambió: {expected['asn']} → {current['asn']}")
+        if expected.get("nature") and current["nature"] and expected["nature"] != current["nature"] \
+                and current["nature"] not in bad_nature:
+            issues.append(f"Naturaleza cambió: {expected['nature']} → {current['nature']}")
 
     return {
         "enabled": enabled,
         "pinned": True,
         "ok": len(issues) == 0,
+        "scope": scope,
         "current": current,
         "expected": expected,
         "issues": issues,
@@ -2072,6 +2101,9 @@ class Handler(BaseHTTPRequestHandler):
             config["tunnel_expected"] = {
                 "ip": status.ip,
                 "country_code": (status.profile.get("country_code") or "").upper() or None,
+                "country": status.profile.get("country"),
+                "region": status.profile.get("region"),
+                "city": status.profile.get("city"),
                 "asn": status.profile.get("asn"),
                 "nature": (status.nature or {}).get("type"),
             }

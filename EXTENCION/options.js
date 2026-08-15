@@ -57,6 +57,7 @@ async function loadConfig() {
     document.getElementById("fraudThreshold").value = currentConfig.notify_on_fraud_above ?? 40;
     document.getElementById("scriptPath").value = currentConfig.script_on_ip_change || "";
     document.getElementById("expCountry").value = (currentConfig.expected_country || "").toUpperCase();
+    document.getElementById("tunnelScope").value = currentConfig.tunnel_watch_scope || "country";
     sw("swAutoTz", currentConfig.auto_tz);
     sw("swTunnel", currentConfig.using_tunnel);
 
@@ -120,6 +121,7 @@ async function saveConfig() {
     notify_on_fraud_above: parseInt(document.getElementById("fraudThreshold").value) ?? 40,
     script_on_ip_change: document.getElementById("scriptPath").value.trim(),
     expected_country: cc,
+    tunnel_watch_scope: document.getElementById("tunnelScope").value || "country",
     using_tunnel: isSw("swTunnel"),
     auto_tz: isSw("swAutoTz"),
     webhooks: webhooks

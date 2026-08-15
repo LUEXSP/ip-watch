@@ -327,20 +327,29 @@ function renderTunnel(d) {
   const badge = document.getElementById("tunnelBadge");
   const detail = document.getElementById("tunnelDetail");
   if (!badge) return;
+  // Ubicación actual legible: "Florida, Estados Unidos" (sin exponer la IP, que rota).
+  const here = [t.current?.region, t.current?.country].filter(Boolean).join(", ")
+    || t.current?.country_code || "ubicación desconocida";
+  const scopeLabel = { country: "país", region: "estado/región", strict: "IP exacta" }[t.scope] || "país";
+
   if (!t.pinned) {
     badge.textContent = "Sin fijar";
     badge.className = "chip warn";
-    if (detail) detail.textContent = "Fija el estado actual para vigilar caídas de túnel.";
+    if (detail) detail.textContent = `Ahora en ${here}. Fija el estado actual para vigilar caídas de túnel.`;
     return;
   }
   if (t.ok) {
     badge.textContent = "✓ Protegido";
     badge.className = "chip good";
-    if (detail) detail.textContent = `Estado bueno: ${t.expected?.ip || "?"} (${t.expected?.country_code || "?"} · ${t.expected?.nature || "?"})`;
+    if (detail) {
+      detail.textContent =
+        `Ahora en ${here} · vigilando ${scopeLabel} (${t.expected?.country_code || "?"}). ` +
+        `Rotar de IP dentro del mismo ${scopeLabel} no genera alerta.`;
+    }
   } else {
     badge.textContent = "⚠️ Cambió";
     badge.className = "chip bad";
-    if (detail) detail.innerHTML = (t.issues || []).map(s => `• ${s}`).join("<br>");
+    if (detail) detail.innerHTML = `Ahora en ${here}<br>` + (t.issues || []).map(s => `• ${s}`).join("<br>");
   }
 }
 

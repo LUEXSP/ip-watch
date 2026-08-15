@@ -138,8 +138,9 @@ async function showToast() {
     const score = data.fraud?.fraud_score ?? "?";
     const risk = data.fraud?.risk || "?";
     const city = data.profile?.city || "";
+    const region = data.profile?.region || "";
     const country = data.profile?.country || "";
-    const location = [city, country].filter(Boolean).join(", ") || "Ubicación desconocida";
+    const location = [city, region, country].filter(Boolean).join(", ") || "Ubicación desconocida";
     const proxy = data.privacy?.proxy?.enabled === true ? " | Proxy: ON" : "";
     const abuse = data.abuseipdb?.score !== undefined ? ` | Abuse: ${data.abuseipdb.score}` : "";
 
@@ -164,19 +165,50 @@ async function notifyIPChange(payload) {
   const score = payload.fraud?.fraud_score ?? "?";
   const risk = payload.fraud?.risk || "?";
   const city = payload.profile?.city || "";
+  const region = payload.profile?.region || "";
   const country = payload.profile?.country || "";
-  const location = [city, country].filter(Boolean).join(", ");
+  const countryCode = (payload.profile?.country_code || "").toUpperCase();
   const abuseScore = payload.abuseipdb?.score ?? null;
 
-  let msg = `Fraude: ${score}/100 (${risk})`;
-  if (location) msg += `\n${location}`;
-  if (abuseScore !== null) msg += `\nAbuseIPDB: ${abuseScore}/100`;
+  // Un exit residencial rota de IP sin que nada se rompa: solo avisamos cuando cambia
+  // la ubicación relevante según el alcance configurado (por defecto, el país).
+  const scope = payload.tunnel?.scope || "country";
+  const prev = await chrome.storage.local.get({ lastAnnouncedCountry: "", lastAnnouncedRegion: "" });
+  const countryChanged = Boolean(countryCode) && Boolean(prev.lastAnnouncedCountry)
+    && countryCode !== prev.lastAnnouncedCountry;
+  const regionChanged = Boolean(region) && Boolean(prev.lastAnnouncedRegion)
+    && region !== prev.lastAnnouncedRegion;
+  const firstRun = !prev.lastAnnouncedCountry;
+
+  let shouldNotify;
+  if (scope === "strict") shouldNotify = true;
+  else if (scope === "region") shouldNotify = firstRun || countryChanged || regionChanged;
+  else shouldNotify = firstRun || countryChanged;
+
+  // Siempre guardamos la ubicación y la IP para no re-anunciar y para el badge.
+  await chrome.storage.local.set({
+    lastAnnouncedIp: ip,
+    lastAnnouncedAt: Date.now(),
+    lastAnnouncedCountry: countryCode || prev.lastAnnouncedCountry,
+    lastAnnouncedRegion: region || prev.lastAnnouncedRegion
+  });
+
+  // Mandar al popup si está abierto (siempre: la UI debe reflejar la IP nueva).
+  chrome.runtime.sendMessage({ type: "IP_CHANGED", payload }).catch(() => {});
+
+  if (!shouldNotify) return;
+
+  const where = [region, country].filter(Boolean).join(", ") || countryCode || "ubicación desconocida";
+  let msg = `Ahora en ${where}`;
+  if (city) msg += ` (${city})`;
+  msg += `\nFraude: ${score}/100 (${risk})`;
+  if (abuseScore !== null) msg += ` · AbuseIPDB: ${abuseScore}/100`;
 
   const id = `change_${Date.now()}`;
   chrome.notifications.create(id, {
     type: "basic",
     iconUrl: "icon128.png",
-    title: `IP cambió → ${ip}`,
+    title: `📍 Ubicación de salida: ${where}`,
     message: msg,
     priority: 2,
     requireInteraction: false
@@ -186,28 +218,23 @@ async function notifyIPChange(payload) {
   // TTS — Voice Engine v2: cola, deduplicación, retry y diagnóstico.
   const { ttsEnabled = true } = await chrome.storage.sync.get({ ttsEnabled: true });
   if (ttsEnabled) {
-    const spokenIp = String(ip).replaceAll(".", " punto ");
     await enqueueVoice(
-      `IP cambiada a ${spokenIp}. Puntuación de fraude ${score}.`,
+      `Tu salida ahora es ${where}. Puntuación de fraude ${score}.`,
       { lang: "es-ES", rate: 0.9 }
     );
   }
-
-  // Registrar la última IP anunciada para evitar duplicados y recuperar eventos perdidos.
-  await chrome.storage.local.set({ lastAnnouncedIp: ip, lastAnnouncedAt: Date.now() });
-
-  // Mandar al popup si está abierto
-  chrome.runtime.sendMessage({ type: "IP_CHANGED", payload }).catch(() => {});
 }
 
 // ── Tunnel alert (kill-switch informativo, con TTS) ──────
 async function notifyTunnelAlert(payload) {
   const issues = Array.isArray(payload?.issues) ? payload.issues : [];
+  const cur = payload?.current || {};
+  const where = [cur.region, cur.country].filter(Boolean).join(", ") || cur.country_code || "";
   const id = `tunnel_${Date.now()}`;
   chrome.notifications.create(id, {
     type: "basic",
     iconUrl: "icon128.png",
-    title: `🛡️ Alerta de túnel — estado cambió`,
+    title: where ? `🛡️ Alerta de túnel — ahora en ${where}` : `🛡️ Alerta de túnel`,
     message: issues.length ? issues.join("\n") : "El estado protegido de tu IP cambió.",
     priority: 2,
     requireInteraction: true

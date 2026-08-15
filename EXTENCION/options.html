@@ -193,6 +193,18 @@
         </div>
         <div class="sw" id="swAutoTz"><div class="knob"></div></div>
       </div>
+      <div class="field">
+        <label>Avisarme de cambio de túnel cuando cambie</label>
+        <select id="tunnelScope" style="width:100%">
+          <option value="country">El país (recomendado) — rotar de IP no alerta</option>
+          <option value="region">El estado/región o el país</option>
+          <option value="strict">Cualquier cosa: IP, ASN, país o naturaleza</option>
+        </select>
+        <div class="field-hint">
+          Un exit residencial rota de IP constantemente sin que el túnel se caiga. Con "El país" solo se avisa
+          si sales del país fijado o si el exit degrada a datacenter/VPN/Tor.
+        </div>
+      </div>
     </div>
   </div>
 
