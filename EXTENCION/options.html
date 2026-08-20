@@ -1,0 +1,306 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>IP Watch — Configuración</title>
+  <style>
+    :root {
+      --bg: #070d1a; --bg2: #0d1627; --bg3: #111e35;
+      --line: rgba(255,255,255,.10); --line2: rgba(255,255,255,.06);
+      --text: rgba(255,255,255,.93); --muted: rgba(255,255,255,.55);
+      --good: #34d399; --warn: #fbbf24; --bad: #f87171; --accent: #60a5fa;
+    }
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body {
+      min-height: 100vh; background: var(--bg); color: var(--text);
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      font-size: 14px;
+    }
+    .wrap { max-width: 680px; margin: 0 auto; padding: 32px 24px; }
+    .page-title { font-size: 22px; font-weight: 900; margin-bottom: 4px; }
+    .page-sub { font-size: 13px; color: var(--muted); margin-bottom: 28px; }
+    .section { margin-bottom: 28px; }
+    .section-title {
+      font-size: 11px; font-weight: 700; letter-spacing: .7px;
+      text-transform: uppercase; color: var(--muted); margin-bottom: 14px;
+      padding-bottom: 8px; border-bottom: 1px solid var(--line2);
+    }
+    .card { background: var(--bg2); border: 1px solid var(--line); border-radius: 14px; padding: 18px; }
+    .field { margin-bottom: 16px; }
+    .field:last-child { margin-bottom: 0; }
+    .field label {
+      display: block; font-size: 12px; font-weight: 700; color: var(--muted);
+      text-transform: uppercase; letter-spacing: .4px; margin-bottom: 6px;
+    }
+    .field input, .field textarea, .field select {
+      width: 100%; background: var(--bg3); border: 1px solid var(--line);
+      color: var(--text); border-radius: 8px; padding: 9px 12px; font-size: 13px;
+      font-family: inherit;
+    }
+    .field input:focus, .field textarea:focus, .field select:focus {
+      outline: none; border-color: rgba(96,165,250,.6);
+    }
+    .field textarea { min-height: 80px; resize: vertical; font-family: "Cascadia Code", monospace; }
+    .field-hint { font-size: 11px; color: var(--muted); margin-top: 5px; }
+    .toggle-row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 0; border-bottom: 1px solid var(--line2);
+    }
+    .toggle-row:last-child { border-bottom: none; }
+    .tl { font-size: 13px; font-weight: 600; }
+    .ts { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .sw {
+      width: 42px; height: 24px; border-radius: 12px;
+      background: rgba(255,255,255,.12); border: 1px solid var(--line);
+      position: relative; cursor: pointer; flex-shrink: 0; transition: background .2s;
+    }
+    .sw.on { background: rgba(52,211,153,.25); border-color: rgba(52,211,153,.5); }
+    .sw .knob {
+      width: 18px; height: 18px; border-radius: 9px;
+      background: rgba(255,255,255,.85); position: absolute; top: 2px; left: 2px;
+      transition: left .2s;
+    }
+    .sw.on .knob { left: 20px; }
+    .btn {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 9px 18px; border-radius: 10px;
+      border: 1px solid var(--line); background: rgba(255,255,255,.08);
+      color: var(--text); font-size: 13px; font-weight: 700; cursor: pointer;
+      transition: background .15s;
+    }
+    .btn:hover { background: rgba(255,255,255,.14); }
+    .btn.primary { background: rgba(96,165,250,.18); border-color: rgba(96,165,250,.4); color: var(--accent); }
+    .btn.success { background: rgba(52,211,153,.12); border-color: rgba(52,211,153,.3); color: var(--good); }
+    .btn.danger  { background: rgba(248,113,113,.1); border-color: rgba(248,113,113,.3); color: var(--bad); }
+    .btn-row { display: flex; gap: 9px; flex-wrap: wrap; margin-top: 16px; }
+    #msg {
+      padding: 10px 14px; border-radius: 10px; margin-bottom: 16px;
+      font-weight: 600; display: none; font-size: 13px;
+    }
+    #msg.ok  { background: rgba(52,211,153,.2); border: 1px solid rgba(52,211,153,.4); color: var(--good); }
+    #msg.err { background: rgba(248,113,113,.2); border: 1px solid rgba(248,113,113,.4); color: var(--bad); }
+    .webhook-item {
+      display: flex; align-items: center; gap: 8px;
+      padding: 7px 0; border-bottom: 1px solid var(--line2);
+    }
+    .webhook-item span { flex: 1; font-family: monospace; font-size: 12px; word-break: break-all; }
+    .tag { font-size: 10px; background: rgba(96,165,250,.15); color: var(--accent);
+      border-radius: 4px; padding: 2px 6px; font-weight: 700; }
+    .sched-item { padding: 8px 0; border-bottom: 1px solid var(--line2); }
+    .sched-item:last-child { border-bottom: none; }
+    a { color: var(--accent); }
+    code {
+      background: rgba(255,255,255,.08); border-radius: 4px;
+      padding: 1px 5px; font-family: monospace; font-size: 12px;
+    }
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,.15); border-radius: 3px; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="page-title">⚙️ Configuración</div>
+  <div class="page-sub">IP Watch v2.0 — Instalación local. Los cambios se guardan en el agente.</div>
+
+  <div id="msg"></div>
+
+  <!-- ── Local Auth ── -->
+  <div class="section">
+    <div class="section-title">Conexión local</div>
+    <div class="card">
+      <div class="field">
+        <label>Local Auth Token</label>
+        <input type="password" id="localAuthToken" placeholder="Mismo valor que local_auth_token en ip_watch_config.json"/>
+        <div class="field-hint">Debe coincidir exactamente con <code>local_auth_token</code> del archivo <code>ip_watch_config.json</code>.</div>
+      </div>
+      <button class="btn" id="btnSaveLocalToken">Guardar token local en la extensión</button>
+    </div>
+  </div>
+
+  <!-- ── APIs ── -->
+  <div class="section">
+    <div class="section-title">API Keys</div>
+    <div class="card">
+      <div class="field">
+        <label>AbuseIPDB API Key</label>
+        <input type="password" id="abuseKey" placeholder="Pegar API key aquí..."/>
+        <div class="field-hint">
+          Obtén tu key gratis en <a href="https://www.abuseipdb.com/account/api" target="_blank">abuseipdb.com/account/api</a>
+        </div>
+      </div>
+      <div class="field">
+        <label>IPQualityScore API Key</label>
+        <input type="password" id="ipqsKey" placeholder="Pegar API key aquí..."/>
+        <div class="field-hint">
+          Obtén tu key en <a href="https://www.ipqualityscore.com/user/settings" target="_blank">ipqualityscore.com/user/settings</a>
+        </div>
+      </div>
+      <div class="field">
+        <label>IPQualityScore Strictness</label>
+        <input type="number" id="ipqsStrictness" min="0" max="3" value="1"/>
+        <div class="field-hint">0 = más permisivo, 1 recomendado, 2–3 más agresivo.</div>
+      </div>
+      <div class="field">
+        <label>Scamalytics User</label>
+        <input type="text" id="scamUser" placeholder="ej: 6a430a6d79853"/>
+        <div class="field-hint">Usuario de la API de Scamalytics (sin captcha)</div>
+      </div>
+      <div class="field">
+        <label>Scamalytics API Key</label>
+        <input type="password" id="scamKey" placeholder="Pegar API key aquí..."/>
+        <div class="field-hint">
+          Obtén tu key en <a href="https://scamalytics.com/ip/api" target="_blank">scamalytics.com/ip/api</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── StarVPN ── -->
+  <div class="section">
+    <div class="section-title">StarVPN</div>
+    <div class="card">
+      <div class="field">
+        <label>Email</label>
+        <input type="email" id="starEmail" placeholder="tu@email.com"/>
+      </div>
+      <div class="field">
+        <label>Auth Token</label>
+        <input type="password" id="starToken" placeholder="Token de StarVPN..."/>
+        <div class="field-hint">Encontrá tu token en el panel de <a href="https://www.starvpn.com" target="_blank">starvpn.com</a></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Monitoring ── -->
+  <div class="section">
+    <div class="section-title">Monitoreo</div>
+    <div class="card">
+      <div class="field">
+        <label>Intervalo de chequeo de IP (segundos)</label>
+        <input type="number" id="checkInterval" min="30" max="3600" value="120"/>
+        <div class="field-hint">Con qué frecuencia el agente verifica si cambió la IP pública. Mínimo 30s.</div>
+      </div>
+      <div class="field">
+        <label>Alerta fraud score por encima de</label>
+        <input type="number" id="fraudThreshold" min="0" max="100" value="40"/>
+        <div class="field-hint">Si el fraud score supera este valor, se dispara una notificación.</div>
+      </div>
+      <div class="toggle-row">
+        <div>
+          <div class="tl">Cambio automático de timezone</div>
+          <div class="ts">Cambia la zona horaria de Windows según la IP detectada</div>
+        </div>
+        <div class="sw" id="swAutoTz"><div class="knob"></div></div>
+      </div>
+      <div class="field">
+        <label>Avisarme de cambio de túnel cuando cambie</label>
+        <select id="tunnelScope" style="width:100%">
+          <option value="country">El país (recomendado) — rotar de IP no alerta</option>
+          <option value="region">El estado/región o el país</option>
+          <option value="strict">Cualquier cosa: IP, ASN, país o naturaleza</option>
+        </select>
+        <div class="field-hint">
+          Un exit residencial rota de IP constantemente sin que el túnel se caiga. Con "El país" solo se avisa
+          si sales del país fijado o si el exit degrada a datacenter/VPN/Tor.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Riesgo bancario ── -->
+  <div class="section">
+    <div class="section-title">Riesgo bancario / coherencia</div>
+    <div class="card">
+      <div class="field">
+        <label>País real esperado (ISO-2)</label>
+        <input type="text" id="expCountry" maxlength="2" placeholder="p.ej. VE" style="text-transform:uppercase;width:120px"/>
+        <div class="field-hint">
+          Tu país real (código de 2 letras). Se compara con el país de la IP para la coherencia y el Riesgo bancario.
+          Déjalo vacío para autodetección.
+        </div>
+      </div>
+      <div class="toggle-row">
+        <div>
+          <div class="tl">Navego por túnel (WireGuard/VPN)</div>
+          <div class="ts">Los bancos penalizan cualquier túnel aunque el exit sea residencial. Actívalo si tu tráfico va tunelizado.</div>
+        </div>
+        <div class="sw" id="swTunnel"><div class="knob"></div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Script on IP change ── -->
+  <div class="section">
+    <div class="section-title">Script al cambiar IP</div>
+    <div class="card">
+      <div class="field">
+        <label>Ruta del script (.bat, .py, .ps1)</label>
+        <input type="text" id="scriptPath" placeholder="C:\scripts\on_ip_change.bat"/>
+        <div class="field-hint">
+          El agente pasa las variables de entorno <code>IPWATCH_NEW_IP</code> y <code>IPWATCH_OLD_IP</code>.
+          Dejar vacío para desactivar.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Webhooks ── -->
+  <div class="section">
+    <div class="section-title">Webhooks</div>
+    <div class="card">
+      <div id="webhookList" style="margin-bottom:12px">Cargando...</div>
+      <div class="field">
+        <label>Agregar webhook URL</label>
+        <div style="display:flex;gap:8px">
+          <input type="url" id="newWebhook" placeholder="https://hooks.example.com/..." style="flex:1"/>
+          <button class="btn primary" id="btnAddWebhook">+ Agregar</button>
+        </div>
+        <div class="field-hint">
+          El agente hace POST a estas URLs con cada evento <code>IP_CHANGED</code>, <code>HIGH_FRAUD_SCORE</code>, etc.
+        </div>
+      </div>
+      <button class="btn" id="btnTestWebhook">🧪 Test webhook (primero de la lista)</button>
+    </div>
+  </div>
+
+  <!-- ── Scheduler ── -->
+  <div class="section">
+    <div class="section-title">Scheduler de Tareas</div>
+    <div class="card">
+      <div id="schedList" style="margin-bottom:12px">Cargando...</div>
+      <div style="background:var(--bg3);border:1px solid var(--line2);border-radius:10px;padding:14px;font-size:12px;color:var(--muted)">
+        <strong style="color:var(--text)">Cómo agregar tareas:</strong><br><br>
+        Edita <code>ip_watch_config.json</code> directamente y agrega entradas al array <code>scheduler</code>:<br><br>
+        <code style="display:block;background:rgba(0,0,0,.3);padding:8px;border-radius:6px;line-height:1.6">{
+  "name": "speedtest_diario",
+  "action": "speedtest",
+  "every_seconds": 86400
+},
+{
+  "name": "rotar_ip_cada_hora",
+  "action": "rotate_ip",
+  "every_seconds": 3600
+},
+{
+  "name": "ping_webhook",
+  "action": "webhook_ping",
+  "every_seconds": 1800,
+  "url": "https://tu-hook.com"
+}</code>
+        <br>Acciones disponibles: <code>rotate_ip</code> · <code>speedtest</code> · <code>refresh_status</code> · <code>webhook_ping</code>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Save / Reset ── -->
+  <div class="btn-row">
+    <button class="btn primary" id="btnSave">💾 Guardar configuración</button>
+    <button class="btn" id="btnReload">↻ Recargar desde agente</button>
+  </div>
+</div>
+
+<script src="auth.js"></script>
+<script src="options.js"></script>
+</body>
+</html>

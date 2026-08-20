@@ -1,0 +1,617 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <title>IP Watch</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <style>
+    :root {
+      --bg:     #070d1a;
+      --bg2:    #0d1627;
+      --bg3:    #111e35;
+      --line:   rgba(255,255,255,.10);
+      --line2:  rgba(255,255,255,.06);
+      --text:   rgba(255,255,255,.93);
+      --muted:  rgba(255,255,255,.55);
+      --good:   #34d399;
+      --warn:   #fbbf24;
+      --bad:    #f87171;
+      --accent: #60a5fa;
+      --purple: #a78bfa;
+    }
+
+    * { margin:0; padding:0; box-sizing:border-box; }
+
+    body {
+      width: 400px;
+      min-height: 540px;
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 13px;
+    }
+
+    /* ── Header ── */
+    .header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px 14px 0;
+    }
+    .brand { display: flex; align-items: center; gap: 9px; }
+    .brand-icon {
+      width: 32px; height: 32px; border-radius: 10px;
+      background: linear-gradient(135deg, #1d4ed8, #7c3aed);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px; flex-shrink: 0;
+    }
+    .brand-name { font-weight: 800; font-size: 15px; letter-spacing: -.2px; }
+    .brand-sub { font-size: 11px; color: var(--muted); margin-top: 1px; }
+    .status-pill {
+      display: flex; align-items: center; gap: 6px;
+      padding: 5px 10px; border-radius: 20px;
+      border: 1px solid var(--line);
+      background: var(--bg3); font-size: 12px;
+      cursor: pointer;
+    }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: #6b7280; }
+    .dot.ok { background: var(--good); box-shadow: 0 0 6px var(--good); }
+    .dot.err { background: var(--bad); }
+
+    /* ── Tabs ── */
+    .tabs {
+      display: flex; gap: 2px; padding: 10px 14px 0;
+      border-bottom: 1px solid var(--line2);
+    }
+    .tab {
+      flex: 1; padding: 7px 4px; border: none; background: none;
+      color: var(--muted); font-size: 12px; font-weight: 600;
+      cursor: pointer; border-bottom: 2px solid transparent;
+      transition: color .15s, border-color .15s;
+      white-space: nowrap;
+    }
+    .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .tab:hover:not(.active) { color: var(--text); }
+
+    /* ── Panels ── */
+    .panel { display: none; padding: 12px 14px 14px; }
+    .panel.active { display: block; }
+
+    /* ── Cards ── */
+    .card {
+      background: var(--bg2);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 12px;
+      margin-bottom: 9px;
+    }
+    .card-title {
+      font-size: 11px; font-weight: 700; letter-spacing: .5px;
+      text-transform: uppercase; color: var(--muted); margin-bottom: 10px;
+    }
+
+    /* ── IP display ── */
+    .ip-row {
+      display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px;
+    }
+    .ip-big {
+      font-size: 22px; font-weight: 900; letter-spacing: -.5px;
+      font-variant-numeric: tabular-nums;
+    }
+    .ip-flag { font-size: 18px; }
+    .ip-meta { font-size: 12px; color: var(--muted); line-height: 1.7; }
+
+    /* ── Chips ── */
+    .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 9px; }
+    .chip {
+      font-size: 11px; font-weight: 600;
+      padding: 3px 9px; border-radius: 20px;
+      border: 1px solid var(--line);
+      background: rgba(255,255,255,.05);
+    }
+    .chip.good  { color: var(--good);  border-color: rgba(52,211,153,.3); }
+    .chip.warn  { color: var(--warn);  border-color: rgba(251,191,36,.3); }
+    .chip.bad   { color: var(--bad);   border-color: rgba(248,113,113,.3); }
+    .chip.info  { color: var(--accent);border-color: rgba(96,165,250,.3); }
+
+    /* ── Meter ── */
+    .meter-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+    .meter-label { font-size: 12px; color: var(--muted); }
+    .meter-val { font-size: 14px; font-weight: 800; }
+    .bar {
+      height: 7px; border-radius: 20px;
+      background: rgba(255,255,255,.08); overflow: hidden;
+    }
+    .fill {
+      height: 100%; width: 0%; border-radius: 20px;
+      background: var(--good); transition: width .3s ease;
+    }
+    .meter-hint { font-size: 11px; color: var(--muted); margin-top: 5px; }
+
+    /* ── Two col grid ── */
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .mini-box {
+      background: var(--bg3); border: 1px solid var(--line2);
+      border-radius: 10px; padding: 9px;
+    }
+    .mini-box .label { font-size: 10px; color: var(--muted); font-weight: 700;
+      text-transform: uppercase; letter-spacing: .4px; margin-bottom: 4px; }
+    .mini-box .value { font-size: 13px; font-weight: 700; word-break: break-all; }
+    .mini-box .sub { font-size: 10px; color: var(--muted); margin-top: 2px; }
+
+    /* ── Toggle ── */
+    .toggle-row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 8px 0; border-bottom: 1px solid var(--line2);
+    }
+    .toggle-row:last-child { border-bottom: none; }
+    .toggle-info .tl { font-size: 13px; font-weight: 600; }
+    .toggle-info .ts { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .sw {
+      width: 38px; height: 22px; border-radius: 11px;
+      background: rgba(255,255,255,.12); border: 1px solid var(--line);
+      position: relative; cursor: pointer; flex-shrink: 0; transition: background .2s;
+    }
+    .sw.on { background: rgba(52,211,153,.25); border-color: rgba(52,211,153,.5); }
+    .sw .knob {
+      width: 16px; height: 16px; border-radius: 8px;
+      background: rgba(255,255,255,.85); position: absolute; top: 2px; left: 2px;
+      transition: left .2s;
+    }
+    .sw.on .knob { left: 20px; }
+
+    /* ── Buttons ── */
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+      padding: 8px 14px; border-radius: 10px;
+      border: 1px solid var(--line); background: rgba(255,255,255,.08);
+      color: var(--text); font-size: 12px; font-weight: 700;
+      cursor: pointer; transition: background .15s;
+    }
+    .btn:hover { background: rgba(255,255,255,.14); }
+    .btn.primary { background: rgba(96,165,250,.18); border-color: rgba(96,165,250,.4); color: var(--accent); }
+    .btn.danger  { background: rgba(248,113,113,.12); border-color: rgba(248,113,113,.3); color: var(--bad); }
+    .btn.success { background: rgba(52,211,153,.12); border-color: rgba(52,211,153,.3); color: var(--good); }
+    .btn-row { display: flex; gap: 7px; flex-wrap: wrap; }
+
+    /* ── History table ── */
+    .hist-item {
+      padding: 8px 0; border-bottom: 1px solid var(--line2);
+      display: grid; grid-template-columns: 1fr auto;
+    }
+    .hist-item:last-child { border-bottom: none; }
+    .hist-ip { font-weight: 700; font-size: 13px; font-family: monospace; }
+    .hist-loc { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .hist-score {
+      font-size: 12px; font-weight: 700; text-align: right;
+      align-self: center;
+    }
+    .hist-time { font-size: 10px; color: var(--muted); text-align: right; margin-top: 2px; }
+
+    /* ── Mini chart (SVG) ── */
+    #trendChart { width: 100%; height: 80px; display: block; }
+
+    /* ── Speedtest ── */
+    .speed-grid {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px;
+    }
+    .speed-box {
+      background: var(--bg3); border: 1px solid var(--line2);
+      border-radius: 10px; padding: 10px; text-align: center;
+    }
+    .speed-val { font-size: 20px; font-weight: 900; }
+    .speed-unit { font-size: 10px; color: var(--muted); font-weight: 600;
+      text-transform: uppercase; letter-spacing: .5px; }
+    .speed-label { font-size: 10px; color: var(--muted); margin-top: 3px; }
+
+    /* ── Log ── */
+    #logBox {
+      font-family: "Cascadia Code", monospace;
+      font-size: 10.5px; color: #94a3b8;
+      max-height: 160px; overflow-y: auto;
+      background: #050c1a; border-radius: 8px;
+      padding: 8px; line-height: 1.6;
+      white-space: pre-wrap; word-break: break-all;
+      border: 1px solid var(--line2);
+    }
+
+    /* ── Settings inputs ── */
+    .field { margin-bottom: 12px; }
+    .field label { display: block; font-size: 11px; font-weight: 700;
+      color: var(--muted); margin-bottom: 5px; text-transform: uppercase; letter-spacing: .4px; }
+    .field input, .field textarea {
+      width: 100%; background: var(--bg3); border: 1px solid var(--line);
+      color: var(--text); border-radius: 8px; padding: 7px 10px; font-size: 13px;
+    }
+    .field input:focus, .field textarea:focus {
+      outline: none; border-color: rgba(96,165,250,.5);
+    }
+    .field textarea { min-height: 60px; resize: vertical; font-family: monospace; }
+    .field-hint { font-size: 11px; color: var(--muted); margin-top: 4px; }
+
+    /* ── Toast message ── */
+    #toastMsg {
+      position: fixed; top: 8px; left: 10px; right: 10px;
+      padding: 9px 12px; border-radius: 10px; font-size: 12px; font-weight: 600;
+      text-align: center; z-index: 9999; transition: opacity .3s;
+      display: none;
+    }
+    #toastMsg.ok  { background: rgba(52,211,153,.25); border: 1px solid rgba(52,211,153,.4); color: var(--good); }
+    #toastMsg.err { background: rgba(248,113,113,.25); border: 1px solid rgba(248,113,113,.4); color: var(--bad); }
+
+    /* ── Scrollbar ── */
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,.15); border-radius: 4px; }
+
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .sep { height: 1px; background: var(--line2); margin: 10px 0; }
+  </style>
+</head>
+<body>
+
+<div id="toastMsg"></div>
+
+<!-- Header -->
+<div class="header">
+  <div class="brand">
+    <div class="brand-icon">🛡️</div>
+    <div>
+      <div class="brand-name">IP Watch</div>
+      <div class="brand-sub" id="lastUpdated">Conectando...</div>
+    </div>
+  </div>
+  <div class="status-pill" id="statusPill" title="Click para refrescar">
+    <div class="dot" id="statusDot"></div>
+    <span id="statusText">—</span>
+  </div>
+</div>
+
+<!-- Tabs -->
+<div class="tabs">
+  <button class="tab active" data-tab="dash">📊 Dashboard</button>
+  <button class="tab" data-tab="history">📜 Historial</button>
+  <button class="tab" data-tab="speed">⚡ Speed</button>
+  <button class="tab" data-tab="auto">⚙️ Auto</button>
+  <button class="tab" data-tab="logs">📋 Logs</button>
+</div>
+
+<!-- ══ DASHBOARD ══════════════════════════════════════════ -->
+<div class="panel active" id="tab-dash">
+
+  <!-- IP card -->
+  <div class="card">
+    <div class="card-title">IP Actual</div>
+    <div class="ip-row">
+      <span class="ip-flag" id="ipFlag"></span>
+      <span class="ip-big" id="ipAddr">—</span>
+    </div>
+    <div class="ip-meta">
+      <div id="ipLoc">—</div>
+      <div id="ipOrg">—</div>
+      <div id="ipTz">—</div>
+      <div id="ipHostname" style="font-family:monospace; font-size:11px; opacity:.7"></div>
+    </div>
+    <div class="chips">
+      <span class="chip" id="chipProxy">Proxy: —</span>
+      <span class="chip" id="chipAnon">Anonymizer: —</span>
+      <span class="chip" id="chipBL">Blacklist: —</span>
+      <span class="chip" id="chipAI">AI: —</span>
+    </div>
+  </div>
+
+  <!-- Naturaleza de la IP (residencial vs datacenter/VPN) -->
+  <div class="card" id="natureCard">
+    <div class="card-title">¿Cómo te ve un servicio de IA?</div>
+    <div style="display:flex;align-items:center;gap:10px">
+      <div id="natureBadge" class="chip" style="font-size:13px;padding:6px 12px">—</div>
+      <div style="font-size:11px;color:var(--muted)" id="natureConf"></div>
+    </div>
+    <div id="natureSignals" style="font-size:11px;color:var(--muted);margin-top:7px;line-height:1.6"></div>
+    <div class="sep"></div>
+    <div class="meter-row">
+      <span class="meter-label">🤖 AI-Friendly Score</span>
+      <span class="meter-val" id="aiBigScore">—</span>
+    </div>
+    <div class="bar"><div class="fill" id="aiBigFill"></div></div>
+    <div id="aiRecs" style="font-size:11.5px;margin-top:9px;line-height:1.7"></div>
+  </div>
+
+  <!-- Riesgo bancario (estimado) -->
+  <div class="card" id="bankCard">
+    <div class="card-title">¿Cómo te vería un banco/fintech?</div>
+    <div style="display:flex;align-items:center;gap:10px">
+      <div id="bankLevel" class="chip" style="font-size:13px;padding:6px 12px">Sin datos</div>
+      <div style="font-size:11px;color:var(--muted)">Escala inversa: 0 = riesgo bajo</div>
+    </div>
+    <div class="sep"></div>
+    <div class="meter-row">
+      <span class="meter-label">🏦 Riesgo bancario</span>
+      <span class="meter-val" id="bankScore">—</span>
+    </div>
+    <div class="bar"><div class="fill" id="bankFill"></div></div>
+    <div id="bankFactors" style="font-size:11px;color:var(--muted);margin-top:9px;line-height:1.7"></div>
+    <div id="bankRecs" style="font-size:11.5px;margin-top:8px;line-height:1.7"></div>
+    <div class="sep"></div>
+    <div class="field-hint">Estimación de las señales de red/coherencia que ve un banco. No sustituye sus datos de comportamiento/KYC.</div>
+    <div style="display:flex;align-items:center;gap:8px;margin-top:8px">
+      <label style="font-size:11px;color:var(--muted)">País real esperado (ISO-2):</label>
+      <input id="expCountry" type="text" maxlength="2" placeholder="p.ej. VE"
+             style="width:70px;text-transform:uppercase" />
+      <button id="btnSaveCountry" class="btn btn-sm">Guardar</button>
+    </div>
+  </div>
+
+  <!-- Fugas + coherencia -->
+  <div class="card">
+    <div class="card-title">Privacidad de tu navegación nativa</div>
+    <div class="grid2">
+      <div class="mini-box">
+        <div class="label">Fuga WebRTC</div>
+        <div class="value" id="webrtcVal">Sin probar</div>
+        <div class="sub" id="webrtcSub">Pulsa "Probar fugas"</div>
+      </div>
+      <div class="mini-box">
+        <div class="label">Fuga DNS</div>
+        <div class="value" id="dnsLeakVal">—</div>
+        <div class="sub" id="dnsLeakSub">Resolvers vs país IP</div>
+      </div>
+    </div>
+    <div class="mini-box" style="margin-top:8px">
+      <div class="label">Coherencia timezone</div>
+      <div class="value" id="cohVal">—</div>
+      <div class="sub" id="cohSub"></div>
+    </div>
+    <div style="margin-top:9px">
+      <button class="btn" id="btnLeakTest" style="width:100%">🔍 Probar fugas (WebRTC + DNS)</button>
+    </div>
+  </div>
+
+  <!-- Estado del túnel (kill-switch informativo) -->
+  <div class="card">
+    <div class="card-title">Vigilancia del túnel (WireGuard)</div>
+    <div style="display:flex;align-items:center;gap:10px">
+      <div id="tunnelBadge" class="chip" style="font-size:13px;padding:6px 12px">—</div>
+    </div>
+    <div id="tunnelDetail" style="font-size:11px;color:var(--muted);margin-top:7px;line-height:1.6"></div>
+    <div class="btn-row" style="margin-top:9px">
+      <button class="btn success" id="btnTunnelPin">📌 Fijar estado actual</button>
+      <button class="btn" id="btnTunnelClear">Limpiar</button>
+    </div>
+    <div class="field-hint">Fija la IP/país/ASN actual como "estado bueno". Te aviso si cambia (posible caída de túnel).</div>
+  </div>
+
+  <!-- Fraud + Abuse -->
+  <div class="card">
+    <div class="card-title">Scores de Riesgo</div>
+    <div class="meter-row">
+      <span class="meter-label">🔴 Fraud Score (Scamalytics)</span>
+      <span class="meter-val" id="fraudScore">—</span>
+    </div>
+    <div class="bar"><div class="fill" id="fraudFill"></div></div>
+    <div class="meter-hint"><a id="scamUrl" href="#" target="_blank">Ver reporte ↗</a></div>
+
+    <div class="sep"></div>
+
+    <div class="meter-row">
+      <span class="meter-label">🚨 AbuseIPDB Confidence</span>
+      <span class="meter-val" id="abuseScore">—</span>
+    </div>
+    <div class="bar"><div class="fill" id="abuseFill"></div></div>
+    <div class="meter-hint" id="abuseHint">—</div>
+
+    <div class="sep"></div>
+
+    <div class="meter-row">
+      <span class="meter-label">🛡️ IPQualityScore</span>
+      <span class="meter-val" id="ipqsScore">—</span>
+    </div>
+    <div class="bar"><div class="fill" id="ipqsFill"></div></div>
+    <div class="meter-hint" id="ipqsHint">—</div>
+  </div>
+
+  <!-- DNS + Browser -->
+  <div class="grid2">
+    <div class="mini-box">
+      <div class="label">DNS</div>
+      <div class="value" id="dnsVal">—</div>
+      <div class="sub">Resolver activo</div>
+    </div>
+    <div class="mini-box">
+      <div class="label">Browser</div>
+      <div class="value" id="browserVal">—</div>
+      <div class="sub" id="osVal">—</div>
+    </div>
+  </div>
+
+  <div style="margin-top:9px"></div>
+
+  <div class="grid2">
+    <div class="mini-box">
+      <div class="label">AI Friendly</div>
+      <div class="value" id="aiScore">—</div>
+      <div class="sub" id="aiLabel">—</div>
+    </div>
+    <div class="mini-box">
+      <div class="label">Proxy WinHTTP</div>
+      <div class="value" id="proxyVal">—</div>
+      <div class="sub" id="proxyDetail">—</div>
+    </div>
+  </div>
+
+  <div style="margin-top:9px"></div>
+
+  <!-- Actions -->
+  <div class="btn-row">
+    <button class="btn primary" id="btnRefresh">🔄 Refresh</button>
+    <button class="btn" id="btnToast">🔔 Toast</button>
+    <button class="btn" id="btnWebRTC">🔍 WebRTC</button>
+    <button class="btn" id="btnExport">💾 Export</button>
+    <button class="btn danger" id="btnRotate">🔃 Rotar IP</button>
+    <button class="btn" id="btnSyncTz">🕒 Sync TZ</button>
+  </div>
+</div>
+
+<!-- ══ HISTORIAL ══════════════════════════════════════════ -->
+<div class="panel" id="tab-history">
+
+  <div class="card">
+    <div class="card-title" style="display:flex;justify-content:space-between">
+      Tendencia Fraud Score (7 días)
+      <button class="btn" id="btnTrendReload" style="padding:2px 8px;font-size:11px">↻</button>
+    </div>
+    <svg id="trendChart" viewBox="0 0 360 80" preserveAspectRatio="none"></svg>
+    <div class="meter-hint" id="trendHint">—</div>
+  </div>
+
+  <div class="card">
+    <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+      Historial de IPs
+      <div style="display:flex;gap:6px">
+        <button class="btn" id="btnHistPrev" style="padding:3px 8px">←</button>
+        <span id="histPage" style="font-size:11px;color:var(--muted);align-self:center">1</span>
+        <button class="btn" id="btnHistNext" style="padding:3px 8px">→</button>
+        <button class="btn" id="btnHistReload" style="padding:3px 8px">↻</button>
+      </div>
+    </div>
+    <div id="histList">Cargando...</div>
+  </div>
+
+  <!-- Stats -->
+  <div class="card">
+    <div class="card-title">Estadísticas Globales</div>
+    <div class="grid2">
+      <div class="mini-box"><div class="label">Total registros</div><div class="value" id="statTotal">—</div></div>
+      <div class="mini-box"><div class="label">IPs únicas</div><div class="value" id="statUnique">—</div></div>
+      <div class="mini-box"><div class="label">Fraud promedio</div><div class="value" id="statAvg">—</div></div>
+      <div class="mini-box"><div class="label">Fraud máximo</div><div class="value" id="statMax">—</div></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══ SPEEDTEST ══════════════════════════════════════════ -->
+<div class="panel" id="tab-speed">
+  <div class="card">
+    <div class="card-title">Prueba de Velocidad</div>
+    <div class="speed-grid">
+      <div class="speed-box">
+        <div class="speed-val" id="spPing">—</div>
+        <div class="speed-unit">ms</div>
+        <div class="speed-label">Ping</div>
+      </div>
+      <div class="speed-box">
+        <div class="speed-val" id="spDown">—</div>
+        <div class="speed-unit">Mbps</div>
+        <div class="speed-label">Descarga</div>
+      </div>
+      <div class="speed-box">
+        <div class="speed-val" id="spUp">—</div>
+        <div class="speed-unit">Mbps</div>
+        <div class="speed-label">Subida</div>
+      </div>
+    </div>
+    <div style="margin-top:10px;font-size:11px;color:var(--muted)" id="spServer">—</div>
+    <div id="spErrorBox" style="display:none;margin-top:10px;padding:10px;background:rgba(248,113,113,.08);border:1px solid rgba(248,113,113,.25);border-radius:10px">
+      <div style="color:#f87171;font-weight:700;font-size:12px;margin-bottom:5px">speedtest-cli no encontrado</div>
+      <div style="color:var(--muted);font-size:11px;line-height:1.8">
+        En tu terminal (con Python instalado):<br>
+        <code style="background:rgba(0,0,0,.4);padding:2px 7px;border-radius:4px">pip install speedtest-cli</code>
+        <br>Luego reinicia el agente.
+      </div>
+    </div>
+    <div style="margin-top:10px">
+      <button class="btn primary" id="btnSpeedtest" style="width:100%">▶ Iniciar Speedtest</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title" style="display:flex;justify-content:space-between">
+      Historial de Speedtests
+      <button class="btn" id="btnSpeedHist" style="padding:2px 8px;font-size:11px">↻</button>
+    </div>
+    <div id="speedHistList">Cargando...</div>
+  </div>
+</div>
+
+<!-- ══ AUTOMATIZACIÓN ══════════════════════════════════════ -->
+<div class="panel" id="tab-auto">
+
+  <div class="card">
+    <div class="card-title">Notificaciones</div>
+    <div class="toggle-row">
+      <div class="toggle-info">
+        <div class="tl">Notificaciones periódicas</div>
+        <div class="ts">Toast automático de estado</div>
+      </div>
+      <div class="sw" id="swNotif"><div class="knob"></div></div>
+    </div>
+    <div class="toggle-row">
+      <div class="toggle-info">
+        <div class="tl">TTS al cambiar IP</div>
+        <div class="ts">Leer IP en voz alta</div>
+      </div>
+      <div class="sw" id="swTts"><div class="knob"></div></div>
+    </div>
+    <div style="margin-top:10px">
+      <div class="field">
+        <label>Intervalo notificaciones (seg)</label>
+        <input type="number" id="notifInterval" min="15" max="3600" value="60"/>
+      </div>
+      <button class="btn primary" id="btnSaveNotif">💾 Guardar</button>
+      <button class="btn" id="btnTestNotif" style="margin-left:6px">🔔 Probar</button>
+      <button class="btn" id="btnTestVoice" style="margin-left:6px">🔊 Probar voz</button>
+      <div id="voiceStatus" style="margin-top:9px;font-size:11px;color:var(--muted)">Voz: cargando...</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Scheduler de Tareas</div>
+    <div id="schedulerList" style="font-size:12px;color:var(--muted)">Cargando...</div>
+    <div class="sep"></div>
+    <div style="font-size:11px;color:var(--muted)">
+      Editar tareas en <code>ip_watch_config.json</code> → clave <code>scheduler</code><br>
+      Acciones: <code>rotate_ip</code>, <code>speedtest</code>, <code>refresh_status</code>, <code>webhook_ping</code>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Log del Scheduler</div>
+    <div id="schedulerLog" style="font-size:11px;color:var(--muted)">Cargando...</div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Webhooks</div>
+    <div id="webhookList" style="font-size:12px;color:var(--muted);margin-bottom:8px">Cargando...</div>
+    <div style="font-size:11px;color:var(--muted)">
+      Configurar en la pestaña Configuración
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Controles</div>
+    <div class="btn-row">
+      <button class="btn" id="btnResetStream">🔄 Reset eventos</button>
+      <button class="btn danger" id="btnRotate2">🔃 Rotar IP ahora</button>
+    </div>
+  </div>
+</div>
+
+<!-- ══ LOGS ══════════════════════════════════════════════ -->
+<div class="panel" id="tab-logs">
+  <div class="card">
+    <div class="card-title" style="display:flex;justify-content:space-between">
+      Logs del Agente
+      <button class="btn" id="btnClearLogs" style="padding:2px 8px;font-size:11px">Limpiar</button>
+    </div>
+    <div id="logBox">Cargando...</div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">Log de Webhooks</div>
+    <div id="webhookLog" style="font-size:11px">Cargando...</div>
+  </div>
+</div>
+
+<script src="auth.js"></script>
+<script src="popup.js"></script>
+</body>
+</html>
