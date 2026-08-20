@@ -602,7 +602,8 @@ async function refreshVoiceStatus() {
     const queued = Number(status.queued || 0);
     const suffix = status.lastError ? ` — Error: ${status.lastError}` :
       status.lastEvent ? ` — ${status.lastEvent}` : "";
-    el.textContent = `Voz: ${state}${queued ? ` | Cola: ${queued}` : ""}${suffix}`;
+    const voice = status.voice ? ` | ${status.voice}${status.voiceLang ? ` ${status.voiceLang}` : ""}` : "";
+    el.textContent = `Voz: ${state}${voice}${queued ? ` | Cola: ${queued}` : ""}${suffix}`;
     el.style.color = state === "ERROR" ? "#f87171" : state === "SPEAKING" ? "#fbbf24" : "var(--muted)";
   } catch (error) {
     el.textContent = `Voz: sin respuesta — ${error.message}`;
@@ -893,11 +894,22 @@ document.addEventListener("DOMContentLoaded", () => {
     toast("Notificación enviada");
   });
   document.getElementById("btnTestVoice").addEventListener("click", async () => {
+    toast("Probando voz...");
     const response = await chrome.runtime.sendMessage({
       type: "TEST_VOICE",
       text: "Prueba de voz de IP Watch. El sistema de voz está funcionando correctamente."
     });
-    toast(response?.ok ? "Prueba de voz enviada" : `Error de voz: ${response?.error || "desconocido"}`, !response?.ok);
+    if (response?.ok) {
+      const note = response.match === "exact" ? "" :
+        response.match === "same_language" ? " (voz española alternativa)" :
+        " — no hay voz en español instalada, se usó otro idioma";
+      toast(`Voz reproducida con ${response.voice || "la voz del sistema"}${note}`);
+    } else {
+      const voices = (response?.voices || []).length
+        ? ` | Voces disponibles: ${response.voices.join(", ")}`
+        : " | El sistema no reporta ninguna voz TTS instalada";
+      toast(`No se reprodujo: ${response?.error || "desconocido"}${voices}`, true);
+    }
     setTimeout(refreshVoiceStatus, 250);
   });
   document.getElementById("btnResetStream").addEventListener("click", async () => {

@@ -30,6 +30,48 @@ function isTerminalVoiceEvent(type) {
   return ["end", "interrupted", "cancelled", "error"].includes(type);
 }
 
+// Windows suele traer solo voces en inglés: pedir lang "es-ES" sin voz española
+// instalada deja el TTS en silencio. Elegimos una voz que exista de verdad.
+function listVoices() {
+  return new Promise(resolve => {
+    try {
+      chrome.tts.getVoices(v => resolve(Array.isArray(v) ? v : []));
+    } catch (_) {
+      resolve([]);
+    }
+  });
+}
+
+async function pickVoice(preferredLang = "es-ES") {
+  const voices = await listVoices();
+  const names = voices.map(v => `${v.voiceName || "?"} (${v.lang || "?"})`);
+  if (!voices.length) return { chosen: null, match: "no_voices", names };
+
+  const want = String(preferredLang).toLowerCase();
+  const base = want.split("-")[0];
+  const exact = voices.find(v => (v.lang || "").toLowerCase() === want);
+  const sameLang = voices.find(v => (v.lang || "").toLowerCase().startsWith(base));
+  const chosen = exact || sameLang || voices[0];
+  return {
+    chosen,
+    match: exact ? "exact" : sameLang ? "same_language" : "other_language",
+    names
+  };
+}
+
+function speakOptions(pick, item) {
+  const opts = {
+    rate: Number(item.rate || 0.9),
+    pitch: 1,
+    volume: 1,
+    enqueue: false
+  };
+  // Si hay una voz concreta, la fijamos: mezclar lang con una voz de otro idioma falla.
+  if (pick.chosen?.voiceName) opts.voiceName = pick.chosen.voiceName;
+  else opts.lang = item.lang || "es-ES";
+  return opts;
+}
+
 async function processVoiceQueue() {
   if (voiceSpeaking || voiceQueue.length === 0) {
     await persistVoiceStatus();
@@ -45,13 +87,25 @@ async function processVoiceQueue() {
     lastError: ""
   });
 
+  const pick = await pickVoice(item.lang || "es-ES");
+  if (!pick.chosen) {
+    voiceSpeaking = false;
+    await persistVoiceStatus({
+      state: "ERROR",
+      lastEvent: "no_voices",
+      lastError: "El sistema no tiene ninguna voz TTS instalada."
+    });
+    return;
+  }
+  await persistVoiceStatus({
+    voice: pick.chosen.voiceName || "",
+    voiceLang: pick.chosen.lang || "",
+    voiceMatch: pick.match
+  });
+
   try {
     chrome.tts.speak(item.text, {
-      lang: item.lang || "es-ES",
-      rate: Number(item.rate || 0.9),
-      pitch: 1,
-      volume: 1,
-      enqueue: false,
+      ...speakOptions(pick, item),
       onEvent: async (event) => {
         const type = event?.type || "unknown";
         await persistVoiceStatus({
@@ -105,6 +159,62 @@ async function enqueueVoice(text, options = {}) {
   await persistVoiceStatus({ state: voiceSpeaking ? "QUEUED" : "READY", lastEvent: "queued" });
   processVoiceQueue();
   return { ok: true, queued: voiceQueue.length };
+}
+
+// Prueba real: resuelve cuando el motor TTS termina o falla, no cuando se encola.
+// Antes devolvía "ok" al encolar, así que el popup salía en verde aunque no sonara nada.
+async function testVoice(text) {
+  const pick = await pickVoice("es-ES");
+  if (!pick.chosen) {
+    return {
+      ok: false,
+      error: "El sistema no tiene ninguna voz TTS instalada (instala un paquete de voz en Windows).",
+      voices: pick.names
+    };
+  }
+
+  await stopVoice(true);
+  const info = { voice: pick.chosen.voiceName || "", lang: pick.chosen.lang || "", match: pick.match, voices: pick.names };
+
+  return new Promise(resolve => {
+    let done = false;
+    const finish = (result) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      persistVoiceStatus({
+        state: result.ok ? "IDLE" : "ERROR",
+        lastEvent: result.ok ? "test_end" : "test_failed",
+        lastError: result.ok ? "" : result.error,
+        voice: info.voice,
+        voiceLang: info.lang,
+        voiceMatch: info.match
+      });
+      resolve({ ...info, ...result });
+    };
+    const timer = setTimeout(() => finish({
+      ok: false,
+      error: "El motor TTS no respondió. Revisa el volumen del sistema y la salida de audio."
+    }), 15000);
+
+    try {
+      chrome.tts.speak(text, {
+        ...speakOptions(pick, { rate: 0.9 }),
+        onEvent: (event) => {
+          const type = event?.type;
+          if (type === "error") {
+            finish({ ok: false, error: event?.errorMessage || "Error del motor TTS" });
+          } else if (type === "end") {
+            finish({ ok: true, spoke: true });
+          } else if (type === "interrupted" || type === "cancelled") {
+            finish({ ok: false, error: `Reproducción ${type} por otra app o pestaña` });
+          }
+        }
+      });
+    } catch (error) {
+      finish({ ok: false, error: error.message });
+    }
+  });
 }
 
 async function stopVoice(clearQueue = true) {
@@ -431,8 +541,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     sendResponse({ ok: true });
   }
   if (msg.type === "TEST_VOICE") {
-    enqueueVoice(msg.text || "Prueba de voz de IP Watch. El sistema de voz está funcionando.")
+    testVoice(msg.text || "Prueba de voz de IP Watch. El sistema de voz está funcionando.")
       .then(sendResponse)
+      .catch(error => sendResponse({ ok: false, error: error.message }));
+  }
+  if (msg.type === "LIST_VOICES") {
+    listVoices()
+      .then(voices => sendResponse({
+        ok: true,
+        voices: voices.map(v => `${v.voiceName || "?"} (${v.lang || "?"})`)
+      }))
       .catch(error => sendResponse({ ok: false, error: error.message }));
   }
   if (msg.type === "GET_VOICE_STATUS") {
